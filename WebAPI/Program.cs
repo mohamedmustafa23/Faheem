@@ -1,0 +1,80 @@
+using Application;
+using Infrastructure;
+using Infrastructure.Contexts;
+using Microsoft.EntityFrameworkCore;
+using WebApi;
+using Sentry.AspNetCore;
+
+namespace WebAPI
+{
+    public class Program
+    {
+        public static async Task Main(string[] args)
+        {
+            var builder = WebApplication.CreateBuilder(args);
+
+            // Sentry — captures unexpected server errors (incl. the 500s the error
+            // middleware logs) with full stack traces. DSN + options read from the
+            // "Sentry" config section. Events are auto-tagged by environment.
+            builder.WebHost.UseSentry();
+
+            // Add services to the container.
+
+            builder.Services.AddControllers()
+                .AddJsonOptions(options =>
+                    options.JsonSerializerOptions.Converters.Add(
+                        new System.Text.Json.Serialization.JsonStringEnumConverter()));
+            builder.Services.AddHealthChecks();
+
+
+            var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>()
+                ?? ["http://localhost:3000", "http://localhost:5173"];
+
+            builder.Services.AddCors(options =>
+            {
+                options.AddPolicy("AllowConfigured", policy =>
+                    policy.WithOrigins(allowedOrigins)
+                          .AllowAnyMethod()
+                          .AllowAnyHeader()
+                          .AllowCredentials());
+
+                // Only used in Development via environment check below
+                options.AddPolicy("AllowAll", policy =>
+                    policy.AllowAnyOrigin()
+                          .AllowAnyMethod()
+                          .AllowAnyHeader());
+            });
+ 
+            builder.Services.AddApplicationServices();
+
+            builder.Services.AddInfrastructureServices(builder.Configuration);
+
+            builder.Services.AddJwtAuthentication(builder.Services.GetJwtSettings(builder.Configuration));
+
+            var app = builder.Build();
+
+            // Database Seeder
+            await app.Services.InitializeDatabaseAsync();
+
+            // Configure the HTTP request pipeline.
+            app.UseHttpsRedirection();
+            app.UseCors("AllowConfigured");
+            app.UseMiddleware<ErrorHandlingMiddleware>();
+            app.UseInfrastructure(app.Environment);
+
+            // Serve runtime-uploaded files (materials, etc.) from ContentRoot/wwwroot.
+            // Pointing the provider explicitly avoids a 404 on every upload when the
+            // published API shipped without a wwwroot folder (WebRootPath would be null).
+            var webRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
+            Directory.CreateDirectory(webRoot);
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(webRoot),
+            });
+            app.MapControllers();
+            app.MapHealthChecks("/health");
+
+            app.Run();
+        }
+    }
+}
