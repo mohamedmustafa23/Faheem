@@ -11,10 +11,12 @@ namespace Infrastructure.Academics
     public class GroupService : IGroupService
     {
         private readonly ApplicationDbContext _dbContext;
+        private readonly ICurrentUserService _currentUserService;
 
-        public GroupService(ApplicationDbContext dbContext)
+        public GroupService(ApplicationDbContext dbContext, ICurrentUserService currentUserService)
         {
             _dbContext = dbContext;
+            _currentUserService = currentUserService;
         }
 
         public async Task<string> CreateGroupAsync(CreateGroupRequest request, string tenantId, CancellationToken ct = default)
@@ -33,7 +35,10 @@ namespace Infrastructure.Academics
                 Description = request.Description,
                 EnrollmentCode = enrollmentCode,
                 Status = GroupStatus.Active,
-                TenantId = tenantId
+                TenantId = tenantId,
+                // The creating teacher owns the group. In a center this is what scopes
+                // the group to them; in an individual workspace it's just the owner.
+                OwnerUserId = _currentUserService.UserId
             };
 
             await _dbContext.Groups.AddAsync(group, ct);

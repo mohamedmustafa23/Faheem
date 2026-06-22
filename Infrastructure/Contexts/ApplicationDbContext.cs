@@ -61,17 +61,24 @@ namespace Infrastructure.Contexts
         {
             foreach (var entityType in builder.Model.GetEntityTypes())
             {
-                if (typeof(IMustHaveTenant).IsAssignableFrom(entityType.ClrType))
+                if (!typeof(IMustHaveTenant).IsAssignableFrom(entityType.ClrType))
+                    continue;
+
+                // Group carries an extra ownership rule on top of the tenant scope.
+                if (entityType.ClrType == typeof(Group))
                 {
-                    var method = typeof(ApplicationDbContext)
-                        .GetMethod(nameof(BuildTenantFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                        ?.MakeGenericMethod(entityType.ClrType);
-
-                    var filter = method?.Invoke(this, new object[] { });
-
-                    if (filter != null)
-                        entityType.SetQueryFilter((LambdaExpression)filter);
+                    entityType.SetQueryFilter(BuildGroupFilter());
+                    continue;
                 }
+
+                var method = typeof(ApplicationDbContext)
+                    .GetMethod(nameof(BuildTenantFilter), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                    ?.MakeGenericMethod(entityType.ClrType);
+
+                var filter = method?.Invoke(this, new object[] { });
+
+                if (filter != null)
+                    entityType.SetQueryFilter((LambdaExpression)filter);
             }
         }
 
@@ -79,6 +86,20 @@ namespace Infrastructure.Contexts
         {
             Expression<Func<TEntity, bool>> filter = x =>
                 _currentUserService.IsGlobalUser || x.TenantId == _currentUserService.TenantId;
+
+            return filter;
+        }
+
+        // Same tenant scope, plus: a center member teacher only sees groups they own.
+        // Owners and assistants (and individual-workspace teachers, who are Owners) see
+        // every group in the workspace.
+        private LambdaExpression BuildGroupFilter()
+        {
+            Expression<Func<Group, bool>> filter = g =>
+                _currentUserService.IsGlobalUser
+                || (g.TenantId == _currentUserService.TenantId
+                    && (!_currentUserService.IsWorkspaceMemberTeacher
+                        || g.OwnerUserId == _currentUserService.UserId));
 
             return filter;
         }

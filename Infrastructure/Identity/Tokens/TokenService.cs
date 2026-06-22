@@ -323,6 +323,16 @@ namespace Infrastructure.Identity.Tokens
             {
                 claims.Add(new Claim(ClaimConstants.Tenant, tenantIdClaim));
 
+                // Record the user's role in this workspace so per-request scoping
+                // (e.g. a center member teacher only seeing their own groups) can rely
+                // on the token instead of hitting the DB on every query.
+                var membership = await _dbContext.WorkspaceMembers
+                    .FirstOrDefaultAsync(m => m.UserId == user.Id
+                                           && m.TenantId == tenantIdClaim
+                                           && m.Status == WorkspaceMemberStatus.Active);
+                if (membership != null)
+                    claims.Add(new Claim(ClaimConstants.WorkspaceRole, membership.Role.ToString()));
+
                 var tenantInfo = await _tenantStore.TryGetAsync(tenantIdClaim);
                 if (tenantInfo != null)
                 {
