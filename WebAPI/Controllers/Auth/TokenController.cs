@@ -1,6 +1,7 @@
 ﻿using Application.Features.Identity.Tokens.Queries;
 using Application.Features.Tokens.Commands;
 using Application.Features.Tokens.DTOs;
+using Infrastructure.Identity;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -28,6 +29,21 @@ namespace WebAPI.Controllers.Auth
         public async Task<IActionResult> GetRefreshTokenAsync([FromBody] RefreshTokenRequest request)
         {
             var response = await Sender.Send(new GetRefreshTokenQuery { RefreshTokenRequest = request });
+            return Ok(response);
+        }
+
+        [HttpPost("select-workspace")]
+        [Authorize]
+        [OpenApiOperation("Select Workspace", "Exchanges the account token for a full access token scoped to the chosen workspace (also used to switch workspace).")]
+        public async Task<IActionResult> SelectWorkspaceAsync([FromBody] SelectWorkspaceRequest request)
+        {
+            var command = new SelectWorkspaceCommand
+            {
+                UserId = ClaimsPrincipalExtensions.GetUserId(User)!,
+                TenantId = request.TenantId
+            };
+
+            var response = await Sender.Send(command);
             return Ok(response);
         }
 

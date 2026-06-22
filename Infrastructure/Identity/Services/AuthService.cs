@@ -242,6 +242,18 @@ namespace Infrastructure.Identity.Services
             await _tenantService.DeactivateTenantAsync(newTenantId, ct);
             await _userManager.AddClaimAsync(teacherUser, new Claim(ClaimConstants.Tenant, newTenantId));
 
+            // Workspace membership is the source of truth for login/workspace selection.
+            // Kept in sync with the tenant claim above (legacy paths still read the claim).
+            _dbContext.WorkspaceMembers.Add(new WorkspaceMember
+            {
+                UserId = teacherUser.Id,
+                TenantId = newTenantId,
+                Role = WorkspaceRole.Owner,
+                Status = WorkspaceMemberStatus.Active,
+                CreatedAt = DateTime.UtcNow
+            });
+            await _dbContext.SaveChangesAsync(ct);
+
             return teacherUser.Id;
         }
 
@@ -483,6 +495,17 @@ namespace Infrastructure.Identity.Services
             await _userManager.AddToRoleAsync(assistantUser, RoleConstants.Assistant);
             await _userManager.AddClaimAsync(assistantUser, new Claim(ClaimConstants.Tenant, teacherTenantId));
 
+            // Mirror the claim as a workspace membership (Assistant role in the teacher's workspace).
+            _dbContext.WorkspaceMembers.Add(new WorkspaceMember
+            {
+                UserId = assistantUser.Id,
+                TenantId = teacherTenantId,
+                Role = WorkspaceRole.Assistant,
+                Status = WorkspaceMemberStatus.Active,
+                CreatedAt = DateTime.UtcNow
+            });
+            await _dbContext.SaveChangesAsync(ct);
+
             return assistantUser.Id;
         }
 
@@ -564,6 +587,13 @@ namespace Infrastructure.Identity.Services
                 .ToListAsync(ct);
 
             _dbContext.UserClaims.RemoveRange(tenantClaims);
+
+            // Drop the matching workspace membership so they lose workspace access too.
+            var memberships = await _dbContext.WorkspaceMembers
+                .Where(m => m.UserId == assistantUserId && m.TenantId == teacherTenantId)
+                .ToListAsync(ct);
+
+            _dbContext.WorkspaceMembers.RemoveRange(memberships);
 
             // Revoke any active refresh tokens so they can't keep using the app.
             var activeTokens = await _dbContext.UserRefreshTokens
