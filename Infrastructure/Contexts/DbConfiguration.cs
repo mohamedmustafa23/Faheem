@@ -169,6 +169,44 @@ namespace Infrastructure.Contexts
                 builder.HasIndex(t => new { t.UserId, t.TokenHash });
             }
         }
+
+        internal class WorkspaceMemberConfig : IEntityTypeConfiguration<WorkspaceMember>
+        {
+            public void Configure(EntityTypeBuilder<WorkspaceMember> builder)
+            {
+                builder.ToTable("WorkspaceMembers", "Identity");
+
+                builder.Property(m => m.UserId).IsRequired();
+                builder.Property(m => m.TenantId).HasMaxLength(64).IsRequired();
+
+                builder.Property(m => m.Role)
+                    .HasConversion<string>()
+                    .HasMaxLength(20)
+                    .IsRequired();
+
+                builder.Property(m => m.Status)
+                    .HasConversion<string>()
+                    .HasMaxLength(20)
+                    .IsRequired();
+
+                builder.Property(m => m.CreatedAt).IsRequired();
+
+                // Membership is meaningless without its user — cascade on user delete.
+                // WorkspaceMembers is reachable only via this FK, so there's no
+                // multiple-cascade-path conflict.
+                builder.HasOne(m => m.User)
+                    .WithMany()
+                    .HasForeignKey(m => m.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                // A user can belong to a workspace once.
+                builder.HasIndex(m => new { m.UserId, m.TenantId }).IsUnique();
+
+                // Fast lookup of all members of a workspace (center member lists).
+                builder.HasIndex(m => m.TenantId);
+            }
+        }
+
         internal class GroupConfig : IEntityTypeConfiguration<Domain.Entities.Group>
         {
             public void Configure(EntityTypeBuilder<Domain.Entities.Group> builder)
@@ -184,6 +222,10 @@ namespace Infrastructure.Contexts
 
                 builder.Property(g => g.EnrollmentCode).HasMaxLength(6).IsRequired();
                 builder.HasIndex(g => g.EnrollmentCode).IsUnique();
+
+                // Owning teacher (matters when a center shares one tenant across teachers).
+                builder.Property(g => g.OwnerUserId).HasMaxLength(450);
+                builder.HasIndex(g => g.OwnerUserId).HasFilter("[OwnerUserId] IS NOT NULL");
 
                 builder.Property(g => g.Status)
                        .HasConversion<string>()

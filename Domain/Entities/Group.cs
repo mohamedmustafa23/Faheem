@@ -22,6 +22,14 @@ namespace Domain.Entities
 
         public string TenantId { get; set; } = string.Empty;
 
+        /// <summary>
+        /// The teacher who owns this group. In an Individual workspace this is just the
+        /// owner. In a Center (one tenant, many teachers) it identifies which teacher the
+        /// group belongs to — the center owner sees all, a member teacher sees only their own.
+        /// Nullable for backward compatibility; backfilled to the tenant owner for existing rows.
+        /// </summary>
+        public string? OwnerUserId { get; set; }
+
         /// <summary>Teacher-pinned groups bubble up to the top of their groups list.</summary>
         public bool IsPinned { get; set; } = false;
 

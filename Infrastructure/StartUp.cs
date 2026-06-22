@@ -44,7 +44,6 @@ namespace Infrastructure
             return services
                 .AddDbContext<TenantDbContext>(options => options.UseSqlServer(config.GetConnectionString("DefaultConnection")))
                 .AddMultiTenant<AppTenantInfo>()
-                .WithHeaderStrategy(TenancyConstants.TenantIdName)
                 .WithClaimStrategy(ClaimConstants.Tenant)
                 .WithEFCoreStore<TenantDbContext, AppTenantInfo>()
                 .Services

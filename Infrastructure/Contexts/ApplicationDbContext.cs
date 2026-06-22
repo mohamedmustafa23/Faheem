@@ -24,6 +24,7 @@ namespace Infrastructure.Contexts
         public DbSet<ParentStudentLink> ParentStudentLinks => Set<ParentStudentLink>();
         public DbSet<EmailVerification> EmailVerifications => Set<EmailVerification>();
         public DbSet<UserRefreshToken> UserRefreshTokens { get; set; }
+        public DbSet<WorkspaceMember> WorkspaceMembers => Set<WorkspaceMember>();
 
         // Academics
         public DbSet<Group> Groups => Set<Group>();
