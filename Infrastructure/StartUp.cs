@@ -53,6 +53,7 @@ namespace Infrastructure
                 .AddTransient<ApplicationDbSeeder>()
                 .AddTransient<IEmailService, EmailService>()
                 .AddScoped<ITenantService, TenantService>()
+                .AddScoped<ICenterService, CenterService>()
                 .AddScoped<IAuthService, AuthService>()
                 .AddScoped<ILinkService, LinkService>()
                 .AddScoped<IGroupService, GroupService>()
