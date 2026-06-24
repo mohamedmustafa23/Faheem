@@ -14,7 +14,8 @@ namespace Infrastructure.Constants
         public const string Student = nameof(Student);
         public const string Parent = nameof(Parent);
         public const string Assistant = nameof(Assistant);
-        public static IReadOnlyList<string> DefaultRoles { get; } = new ReadOnlyCollection<string>([Admin, Teacher, Assistant, Student, Parent]);
+        public const string CenterOwner = nameof(CenterOwner);
+        public static IReadOnlyList<string> DefaultRoles { get; } = new ReadOnlyCollection<string>([Admin, Teacher, Assistant, Student, Parent, CenterOwner]);
 
         public static bool IsDefaultRole(string roleName) =>
             DefaultRoles.Contains(roleName);

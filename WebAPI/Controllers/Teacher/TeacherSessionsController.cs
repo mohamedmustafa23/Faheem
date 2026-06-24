@@ -11,7 +11,7 @@ using NSwag.Annotations;
 namespace WebAPI.Controllers.Teacher
 {
     [Route("api/teacher/sessions")]
-    [Authorize(Roles = $"{RoleConstants.Teacher},{RoleConstants.Assistant}")]
+    [Authorize(Roles = $"{RoleConstants.CenterOwner},{RoleConstants.Teacher},{RoleConstants.Assistant}")]
     [OpenApiTag("Teacher - Sessions", Description = "Endpoints for managing recurring session schedules and today's occurrences")]
     public class TeacherSessionsController : BaseApiController
     {

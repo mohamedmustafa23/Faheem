@@ -300,7 +300,92 @@ Each phase ends with a verification gate before the next begins.
 
 ---
 
-## 11. Open Items / Future
+## 11. Center Operating Roles & Revenue Share (Phase 4)
+
+The center is the paying customer in the multi-teacher model, so it needs real
+operational power — not just reporting. The two-axis authorization stays the
+backbone:
+
+- **Capability** (what actions) — permission claims in the JWT.
+- **Data scope** (which rows) — the `workspace_role` claim drives the `Group`
+  query filter (member `Teacher` → own groups; `Owner`/`Assistant`/`Staff` → all).
+
+### Capability source: per-membership flags
+Capability stops being purely a function of the global Identity role. A new
+`[Flags] CenterPermissions` enum is stored on `WorkspaceMember.Permissions`
+(int). At token issue, `TokenService` maps the selected membership's flags →
+permission claims and unions them with the Identity-role claims. Individual
+teachers are untouched (their toolkit still comes from the `Teacher` role; their
+membership needs no flags). Additive by design — adding a capability later is one
+enum value + one mapping line, **no migration**.
+
+```
+[Flags] CenterPermissions {
+  None=0, ManageGroups=1, ManageAttendance=2, ManageStudents=4,
+  ManagePayments=8, ViewFinancials=16, DeleteGroups=32, All=63
+}
+```
+
+Flag → permission-claim mapping (single static table in TokenService):
+- ManageGroups     → Groups.Create/Read/Update, Sessions.Create/Read/Update/Delete
+- DeleteGroups     → Groups.Delete
+- ManageAttendance → Attendance.Create/Read/Update, Sessions.Read
+- ManageStudents   → Students.Read/Update/Delete, Enrollment.Read/Delete
+- ManagePayments   → Payments.Read/Update/Delete
+- ViewFinancials   → Payments.Read
+
+Subscription-expired gating is unchanged (only `.Read` claims survive). Grades
+are intentionally NOT a center capability yet (teacher-only); add a flag later if
+needed.
+
+The teacher-area controllers also carry a coarse `[Authorize(Roles = …)]` gate on
+top of the per-action `[ShouldHavePermission]`. `CenterOwner` was added to the
+Groups / Attendance / Sessions / Payments controllers so the owner passes the
+coarse gate; the fine-grained permission check + the membership flags remain the
+real authorization. Add `Staff` to these gates in 4.3.
+
+### Revenue share
+`WorkspaceMember.SharePercent` (decimal?, nullable) = the **center's** cut of this
+teacher's revenue (e.g. 30 ⇒ center 30%, teacher 70%). Set by the owner only.
+Payout is computed on **collected money** (sum of PaymentTransactions for groups
+the teacher owns in that tenant); expected/outstanding are shown for context, not
+split. The owner sees the per-teacher payout table; the teacher sees their own
+percentage and earnings inside that center workspace.
+
+### Owner-assigned group ownership
+The owner (and Staff/assistant with `ManageGroups`) may create a group on behalf
+of a teacher: `CreateGroupRequest.OwnerTeacherId?` — when set to a valid active
+`Teacher` member of the tenant, the new group's `OwnerUserId` is that teacher
+(else it defaults to the caller). Keeps payout and scoping correct.
+
+### Frontend: capability-driven adaptive shell
+One app; navigation and in-screen controls are generated from
+`permissions[]` + `workspaceRole` + `tenantType` (via a `usePermissions().can()`
+helper), never hardcoded per role. Feature screens (groups, attendance, payments)
+are shared and backend-scoped; only a few aggregate screens are owner-only (center
+overview, members, per-teacher payout). Switching workspaces re-issues the token
+and the whole shell re-adapts.
+
+### Delivery order
+- **4.1 — Owner operates the center.** `CenterPermissions` enum + `Permissions`
+  /`SharePercent` columns + migration (backfill existing `Owner` rows → All);
+  token flag-merge; `CreateGroupRequest.OwnerTeacherId`; frontend
+  `usePermissions`/`can`, capability-driven `BottomNav`, owner reuses teacher
+  screens with a per-teacher filter on groups.
+- **4.2 — Revenue share & payout.** `PUT /api/center/members/{userId}/share`,
+  `GET /api/center/financials`; owner payout screen + share editing; teacher sees
+  their share inside a center.
+- **4.3 (later) — Staff role + granular per-member permissions UI** (`WorkspaceRole.Staff`).
+- **4.4 (later) — Teacher's personal assistant follows them across workspaces.**
+
+### Cleanup folded into this work
+- Remove the now-dead "أعضاء المركز" card in `profile.tsx` (a teacher is never a
+  center owner in the standalone model).
+- Verify/restore `Groups.Read` for the `Assistant` permission set if missing.
+
+---
+
+## 12. Open Items / Future
 
 - **Tenant Id → GUID** instead of `tenant_{phone}` (privacy/predictability;
   low priority now that header override is gone).

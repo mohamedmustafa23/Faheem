@@ -221,6 +221,26 @@ namespace Infrastructure.Identity.Tokens
         private async Task<TokenResponse> BuildWorkspaceSelectionResponseAsync(
             ApplicationUser user, List<WorkspaceMember> memberships)
         {
+            return new TokenResponse
+            {
+                JwtToken = GenerateAccountToken(user),
+                RefreshToken = string.Empty,
+                RequiresWorkspaceSelection = true,
+                Workspaces = await MapWorkspaceOptionsAsync(memberships)
+            };
+        }
+
+        public async Task<List<WorkspaceOption>> GetUserWorkspacesAsync(string userId)
+        {
+            var memberships = await _dbContext.WorkspaceMembers
+                .Where(m => m.UserId == userId && m.Status == WorkspaceMemberStatus.Active)
+                .ToListAsync();
+
+            return await MapWorkspaceOptionsAsync(memberships);
+        }
+
+        private async Task<List<WorkspaceOption>> MapWorkspaceOptionsAsync(List<WorkspaceMember> memberships)
+        {
             var workspaces = new List<WorkspaceOption>();
             foreach (var m in memberships)
             {
@@ -233,14 +253,7 @@ namespace Infrastructure.Identity.Tokens
                     Role = m.Role.ToString()
                 });
             }
-
-            return new TokenResponse
-            {
-                JwtToken = GenerateAccountToken(user),
-                RefreshToken = string.Empty,
-                RequiresWorkspaceSelection = true,
-                Workspaces = workspaces
-            };
+            return workspaces;
         }
 
         // A minimal, short-lived token that authenticates the user but carries no tenant
@@ -315,6 +328,7 @@ namespace Infrastructure.Identity.Tokens
             };
 
             bool isSubscriptionExpired = false;
+            var centerPermissions = CenterPermissions.None;
             // The tenant is the workspace the user selected at login — NOT a standalone
             // user claim (a user can now belong to several workspaces).
             var tenantIdClaim = selectedTenantId;
@@ -331,19 +345,30 @@ namespace Infrastructure.Identity.Tokens
                                            && m.TenantId == tenantIdClaim
                                            && m.Status == WorkspaceMemberStatus.Active);
                 if (membership != null)
+                {
                     claims.Add(new Claim(ClaimConstants.WorkspaceRole, membership.Role.ToString()));
+                    // Operational capabilities this member was granted inside the workspace.
+                    centerPermissions = membership.Permissions;
+                }
 
                 var tenantInfo = await _tenantStore.TryGetAsync(tenantIdClaim);
                 if (tenantInfo != null)
                 {
-                    if (!tenantInfo.IsActive)
+                    // A center owner may log in even while the center is inactive so they can
+                    // SEE the "not subscribed yet / expired" state and renew. Everyone else is
+                    // blocked when their workspace is deactivated.
+                    var isCenterOwner = membership?.Role == WorkspaceRole.Owner
+                                        && tenantInfo.Type == TenantType.Center;
+
+                    if (!tenantInfo.IsActive && !isCenterOwner)
                         throw new UnauthorizedException(["Your workspace is deactivated. Please contact platform support."]);
 
-                    if (tenantInfo.ValidUpTo < DateTime.UtcNow)
+                    if (!tenantInfo.IsActive || tenantInfo.ValidUpTo < DateTime.UtcNow)
                     {
                         isSubscriptionExpired = true;
                     }
 
+                    claims.Add(new Claim("Tenant_Type", tenantInfo.Type.ToString()));
                     claims.Add(new Claim("Tenant_IsActive", tenantInfo.IsActive.ToString()));
                     claims.Add(new Claim("Tenant_ValidUpTo", tenantInfo.ValidUpTo.ToString("O")));
                     claims.Add(new Claim("Tenant_IsExpired", isSubscriptionExpired.ToString())); 
@@ -377,6 +402,16 @@ namespace Infrastructure.Identity.Tokens
                     }
                 }
             }
+            // Center-membership capability flags widen what this member can do in the
+            // selected workspace, on top of their Identity-role permissions. When the
+            // subscription has lapsed, only read access survives (same rule as above).
+            foreach (var permissionName in CenterPermissionMap.ToPermissionNames(centerPermissions))
+            {
+                if (isSubscriptionExpired && !permissionName.EndsWith($".{AppAction.Read}"))
+                    continue;
+                permissionClaims.Add(new Claim(ClaimConstants.Permission, permissionName));
+            }
+
             // Exclude any standalone tenant claim from the DB — the authoritative tenant
             // is the selected workspace, already added above.
             var allClaims = claims

@@ -28,56 +28,6 @@ namespace Infrastructure.Tenancy
             _tenantStore = tenantStore;
         }
 
-        // ── Admin: create a center owned by an existing user ───────────────────
-        public async Task<string> CreateCenterAsync(CreateCenterRequest request, CancellationToken ct = default)
-        {
-            var key = request.OwnerPhoneOrEmail.Trim();
-            var owner = await _userManager.Users
-                .FirstOrDefaultAsync(u => u.PhoneNumber == key || u.Email == key, ct)
-                ?? throw new NotFoundException(["No registered user found with that phone/email to own the center."]);
-
-            if (!owner.EmailConfirmed)
-                throw new ConflictException(["The center owner must verify their account before owning a center."]);
-
-            var tenantId = $"center_{Guid.NewGuid():N}";
-
-            var tenant = new AppTenantInfo
-            {
-                Id = tenantId,
-                Identifier = tenantId,
-                Name = request.Name,
-                Email = owner.Email ?? string.Empty,
-                FirstName = owner.FirstName,
-                LastName = owner.LastName,
-                ConnectionString = null, // shared DB, tenant-filtered
-                ValidUpTo = request.ValidUpTo ?? DateTime.UtcNow.AddMonths(1),
-                IsActive = true,
-                Type = TenantType.Center,
-                MaxTeachers = request.MaxTeachers
-            };
-            await _tenantStore.TryAddAsync(tenant);
-
-            // A center owner operates the workspace as a teacher — make sure they have
-            // the capability (idempotent).
-            if (!await _userManager.IsInRoleAsync(owner, RoleConstants.Teacher))
-                await _userManager.AddToRoleAsync(owner, RoleConstants.Teacher);
-
-            // Owner membership + tenant claim (kept in sync with the rest of the codebase).
-            _dbContext.WorkspaceMembers.Add(new WorkspaceMember
-            {
-                UserId = owner.Id,
-                TenantId = tenantId,
-                Role = WorkspaceRole.Owner,
-                Status = WorkspaceMemberStatus.Active,
-                CreatedAt = DateTime.UtcNow
-            });
-            await _dbContext.SaveChangesAsync(ct);
-
-            await _userManager.AddClaimAsync(owner, new Claim(ClaimConstants.Tenant, tenantId));
-
-            return tenantId;
-        }
-
         // ── Center owner: invite an existing user as a teacher ─────────────────
         public async Task<string> InviteTeacherAsync(string tenantId, string ownerUserId, InviteTeacherRequest request, CancellationToken ct = default)
         {
@@ -87,6 +37,8 @@ namespace Infrastructure.Tenancy
                 ?? throw new NotFoundException(["Center not found."]);
             if (tenant.Type != TenantType.Center)
                 throw new ConflictException(["This workspace is not a center."]);
+            if (!tenant.IsActive || tenant.ValidUpTo < DateTime.UtcNow)
+                throw new ConflictException(["The center subscription is inactive. Activate it before adding teachers."]);
 
             var key = request.PhoneOrEmail.Trim();
             var invitee = await _userManager.Users
@@ -240,6 +192,62 @@ namespace Infrastructure.Tenancy
             await _dbContext.SaveChangesAsync(ct);
 
             return "Member removed from the center.";
+        }
+
+        public async Task<CenterOverviewDto> GetCenterOverviewAsync(string tenantId, string ownerUserId, CancellationToken ct = default)
+        {
+            await EnsureOwnerAsync(tenantId, ownerUserId, ct);
+
+            var tenant = await _tenantStore.TryGetAsync(tenantId)
+                ?? throw new NotFoundException(["Center not found."]);
+
+            var activeTeachers = await _dbContext.WorkspaceMembers
+                .CountAsync(m => m.TenantId == tenantId
+                              && m.Role == WorkspaceRole.Teacher
+                              && m.Status == WorkspaceMemberStatus.Active, ct);
+
+            var pendingInvites = await _dbContext.WorkspaceMembers
+                .CountAsync(m => m.TenantId == tenantId
+                              && m.Status == WorkspaceMemberStatus.Invited, ct);
+
+            var daysRemaining = (tenant.ValidUpTo.Date - DateTime.UtcNow.Date).Days;
+            if (daysRemaining < 0) daysRemaining = 0;
+
+            return new CenterOverviewDto
+            {
+                TenantId = tenantId,
+                Name = tenant.Name ?? tenantId,
+                IsActive = tenant.IsActive,
+                SubscriptionValidUntil = tenant.ValidUpTo,
+                SubscriptionDaysRemaining = daysRemaining,
+                MaxTeachers = tenant.MaxTeachers,
+                ActiveTeachers = activeTeachers,
+                PendingInvites = pendingInvites
+            };
+        }
+
+        // ── Admin / payment: activate or renew a center subscription ───────────
+        public async Task<DateTime> SetCenterSubscriptionAsync(SetCenterSubscriptionRequest request, CancellationToken ct = default)
+        {
+            if (request.ExtendMonths < 1)
+                throw new ConflictException(["Extension must be at least 1 month."]);
+
+            var tenant = await _tenantStore.TryGetAsync(request.TenantId)
+                ?? throw new NotFoundException(["Center not found."]);
+            if (tenant.Type != TenantType.Center)
+                throw new ConflictException(["This workspace is not a center."]);
+
+            // Renewal math: if the subscription is still in the future, stack the extension on
+            // top of the existing expiry so the remaining days aren't lost. If it has already
+            // lapsed, start fresh from today (no credit for the days that passed unsubscribed).
+            var now = DateTime.UtcNow;
+            var basis = tenant.ValidUpTo > now ? tenant.ValidUpTo : now;
+            tenant.ValidUpTo = basis.AddMonths(request.ExtendMonths);
+            tenant.IsActive = true;
+            tenant.MaxTeachers = request.MaxTeachers;
+
+            await _tenantStore.TryUpdateAsync(tenant);
+            return tenant.ValidUpTo;
         }
 
         // The caller must be an active Owner of the given center.

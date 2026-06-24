@@ -6,6 +6,7 @@ namespace Application.Interfaces
     public interface IAuthService
     {
         Task<string> RegisterTeacherAsync(RegisterTeacherRequest request, CancellationToken ct = default);
+        Task<string> RegisterCenterAsync(RegisterCenterRequest request, CancellationToken ct = default);
         Task<string> RegisterStudentAsync(RegisterStudentRequest request, CancellationToken ct = default);
         Task<string> RegisterParentAsync(RegisterParentRequest request, CancellationToken ct = default);
 

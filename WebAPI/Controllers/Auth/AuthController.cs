@@ -21,6 +21,16 @@ namespace WebAPI.Controllers.Auth
             return Ok(response);
         }
 
+        [HttpPost("register/center")]
+        [AllowAnonymous]
+        [EnableRateLimiting("RegisterPolicy")]
+        [OpenApiOperation("Register Center", "Registers a standalone center-owner account and creates an inactive Center workspace/tenant.")]
+        public async Task<IActionResult> RegisterCenterAsync([FromBody] RegisterCenterRequest request)
+        {
+            var response = await Sender.Send(new RegisterCenterCommand { Request = request });
+            return Ok(response);
+        }
+
         [HttpPost("register/student")]
         [AllowAnonymous]
         [EnableRateLimiting("RegisterPolicy")]

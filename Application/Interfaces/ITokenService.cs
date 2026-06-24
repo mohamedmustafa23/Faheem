@@ -14,6 +14,9 @@ namespace Application.Interfaces
         /// </summary>
         Task<TokenResponse> SelectWorkspaceAsync(string userId, string tenantId);
 
+        /// <summary>Lists the active workspaces a user belongs to (for the in-app switcher).</summary>
+        Task<List<WorkspaceOption>> GetUserWorkspacesAsync(string userId);
+
         Task LogoutAsync(string userId, string refreshToken);
     }
 }

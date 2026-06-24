@@ -189,6 +189,16 @@ namespace Infrastructure.Contexts
                     .HasMaxLength(20)
                     .IsRequired();
 
+                // Capability bitmask — stored as a plain int so adding a flag needs no migration.
+                builder.Property(m => m.Permissions)
+                    .HasConversion<int>()
+                    .HasDefaultValue(Domain.Enums.CenterPermissions.None)
+                    .IsRequired();
+
+                // Percentage 0–100 with two decimals.
+                builder.Property(m => m.SharePercent)
+                    .HasColumnType("decimal(5,2)");
+
                 builder.Property(m => m.CreatedAt).IsRequired();
 
                 // Membership is meaningless without its user — cascade on user delete.

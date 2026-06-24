@@ -13,12 +13,15 @@ namespace WebAPI.Controllers.Admin
     [OpenApiTag("Admin - Centers", Description = "System administration endpoints for creating tutoring centers")]
     public class CentersController : BaseApiController
     {
-        [HttpPost]
-        [ShouldHavePermission(AppAction.Create, AppFeature.Tenants)]
-        [OpenApiOperation("Create Center", "Creates a Center workspace owned by an existing user, with an optional teacher seat limit.")]
-        public async Task<IActionResult> CreateCenterAsync([FromBody] CreateCenterRequest request)
+        // Center creation is self-service (POST /api/auth/register/center). The admin's only
+        // job here is activating / renewing the subscription once the center owner exists.
+
+        [HttpPut("subscription")]
+        [ShouldHavePermission(AppAction.UpgradeSubscription, AppFeature.Tenants)]
+        [OpenApiOperation("Set Center Subscription", "Activates or renews a center subscription: sets the teacher seat limit and extends the valid-until date (unused days are preserved on early renewal).")]
+        public async Task<IActionResult> SetSubscriptionAsync([FromBody] SetCenterSubscriptionRequest request)
         {
-            var response = await Sender.Send(new CreateCenterCommand { Request = request });
+            var response = await Sender.Send(new SetCenterSubscriptionCommand { Request = request });
             return Ok(response);
         }
     }

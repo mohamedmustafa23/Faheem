@@ -10,11 +10,23 @@ using NSwag.Annotations;
 namespace WebAPI.Controllers.Center
 {
     [Route("api/center")]
-    [Authorize(Roles = $"{RoleConstants.Teacher},{RoleConstants.Assistant}")]
-    [OpenApiTag("Center", Description = "Center owner manages members; invited teachers respond to invites")]
+    [Authorize(Roles = $"{RoleConstants.CenterOwner},{RoleConstants.Teacher},{RoleConstants.Assistant}")]
+    [OpenApiTag("Center", Description = "Center owner manages members + subscription; invited teachers respond to invites")]
     public class CenterController : BaseApiController
     {
         // ── Owner operations (scoped to the currently-selected center workspace) ──
+
+        [HttpGet("overview")]
+        [OpenApiOperation("Get Center Overview", "Dashboard summary for the current center: name, subscription, seats, member counts (owner only).")]
+        public async Task<IActionResult> GetOverviewAsync()
+        {
+            var query = new GetCenterOverviewQuery
+            {
+                TenantId = User.GetTenant()!,
+                OwnerUserId = User.GetUserId()!
+            };
+            return Ok(await Sender.Send(query));
+        }
 
         [HttpPost("invite")]
         [OpenApiOperation("Invite Teacher", "Center owner invites an existing user to join the center as a teacher.")]

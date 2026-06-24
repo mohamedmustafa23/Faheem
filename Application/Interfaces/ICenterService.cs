@@ -4,9 +4,6 @@ namespace Application.Interfaces
 {
     public interface ICenterService
     {
-        /// <summary>Admin: creates a Center workspace owned by an existing user. Returns the new tenant id.</summary>
-        Task<string> CreateCenterAsync(CreateCenterRequest request, CancellationToken ct = default);
-
         /// <summary>Center owner: invites an existing user to join the center as a teacher (Status = Invited).</summary>
         Task<string> InviteTeacherAsync(string tenantId, string ownerUserId, InviteTeacherRequest request, CancellationToken ct = default);
 
@@ -21,5 +18,11 @@ namespace Application.Interfaces
 
         /// <summary>Center owner: removes a member (or pending invite) from the center.</summary>
         Task<string> RemoveMemberAsync(string tenantId, string ownerUserId, string memberUserId, CancellationToken ct = default);
+
+        /// <summary>Center owner: dashboard summary — name, subscription status, seats, member counts.</summary>
+        Task<CenterOverviewDto> GetCenterOverviewAsync(string tenantId, string ownerUserId, CancellationToken ct = default);
+
+        /// <summary>Admin/payment: activates or renews a center subscription (seat limit + extension). Returns the new valid-until date.</summary>
+        Task<DateTime> SetCenterSubscriptionAsync(SetCenterSubscriptionRequest request, CancellationToken ct = default);
     }
 }

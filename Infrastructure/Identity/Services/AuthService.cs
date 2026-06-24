@@ -5,9 +5,11 @@ using Application.Features.Tenancy;
 using Application.Features.Tenancy.DTOs;
 using Application.Interfaces;
 using Domain.Enums;
+using Finbuckle.MultiTenant.Abstractions;
 using Infrastructure.Constants;
 using Infrastructure.Contexts;
 using Infrastructure.Identity.Models;
+using Infrastructure.Tenancy;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
@@ -22,17 +24,23 @@ namespace Infrastructure.Identity.Services
         private readonly ITenantService _tenantService;
         private readonly ApplicationDbContext _dbContext;
         private readonly IEmailService _emailService;
+        private readonly ICurrentUserService _currentUserService;
+        private readonly IMultiTenantStore<AppTenantInfo> _tenantStore;
 
         public AuthService(
             UserManager<ApplicationUser> userManager,
             ITenantService tenantService,
             ApplicationDbContext dbContext,
-            IEmailService emailService)
+            IEmailService emailService,
+            ICurrentUserService currentUserService,
+            IMultiTenantStore<AppTenantInfo> tenantStore)
         {
             _userManager = userManager;
             _tenantService = tenantService;
             _dbContext = dbContext;
             _emailService = emailService;
+            _currentUserService = currentUserService;
+            _tenantStore = tenantStore;
         }
 
         // ══════════════════════════════════════════════════
@@ -255,6 +263,96 @@ namespace Infrastructure.Identity.Services
             await _dbContext.SaveChangesAsync(ct);
 
             return teacherUser.Id;
+        }
+
+        // ══════════════════════════════════════════════════
+        // Register Center (standalone center-owner account)
+        // ══════════════════════════════════════════════════
+        // Mirrors teacher registration but creates a CenterOwner account (never a teacher)
+        // bound to a Center-type tenant. The tenant is created INACTIVE — it stays inactive
+        // until the subscription is activated (admin today; self-service payment later).
+        public async Task<string> RegisterCenterAsync(RegisterCenterRequest request, CancellationToken ct = default)
+        {
+            var existingUser = await _userManager.Users
+                .FirstOrDefaultAsync(u => u.Email == request.Email || u.PhoneNumber == request.PhoneNumber, ct);
+
+            if (existingUser != null)
+            {
+                if (existingUser.EmailConfirmed)
+                {
+                    var errors = new List<string>();
+                    if (existingUser.Email == request.Email) errors.Add("This email is already registered and verified.");
+                    if (existingUser.PhoneNumber == request.PhoneNumber) errors.Add("This phone number is already registered and verified.");
+                    throw new ConflictException(errors);
+                }
+
+                existingUser.FirstName = request.FirstName;
+                existingUser.LastName = request.LastName;
+                existingUser.Email = request.Email;
+                existingUser.UserName = request.PhoneNumber;
+                existingUser.PhoneNumber = request.PhoneNumber;
+                existingUser.EmailConfirmed = false;
+
+                var resetToken = await _userManager.GeneratePasswordResetTokenAsync(existingUser);
+                await _userManager.ResetPasswordAsync(existingUser, resetToken, request.Password);
+
+                return existingUser.Id;
+            }
+
+            var ownerUser = new ApplicationUser
+            {
+                FirstName = request.FirstName,
+                LastName = request.LastName,
+                Email = request.Email,
+                UserName = request.PhoneNumber,
+                PhoneNumber = request.PhoneNumber,
+                UserType = UserType.CenterOwner,
+                IsActive = true
+            };
+
+            var result = await _userManager.CreateAsync(ownerUser, request.Password);
+            if (!result.Succeeded) throw new IdentityException(result.Errors.Select(e => e.Description).ToList());
+
+            await _userManager.AddToRoleAsync(ownerUser, RoleConstants.CenterOwner);
+
+            // Center-type tenant. TEMPORARY: every new center gets an immediate 1-month
+            // active trial (no seat limit) so it's usable straight away — mirrors the
+            // teacher's one-month grant. This stands in until the self-service subscription
+            // page exists; then registration will create it inactive and payment activates it.
+            var tenantId = $"center_{Guid.NewGuid():N}";
+            var tenant = new AppTenantInfo
+            {
+                Id = tenantId,
+                Identifier = tenantId,
+                Name = request.CenterName,
+                Email = request.Email,
+                FirstName = request.FirstName,
+                LastName = request.LastName,
+                ConnectionString = null,                      // shared DB, tenant-filtered
+                ValidUpTo = DateTime.UtcNow.AddMonths(1),      // 1-month trial
+                IsActive = true,
+                Type = TenantType.Center,
+                MaxTeachers = null                             // unlimited during the trial
+            };
+            await _tenantStore.TryAddAsync(tenant);
+
+            await _userManager.AddClaimAsync(ownerUser, new Claim(ClaimConstants.Tenant, tenantId));
+
+            // Workspace membership is the source of truth for login/workspace selection.
+            // The owner gets full operational capability so they can run the center
+            // (groups, attendance, payments) the moment they log in.
+            _dbContext.WorkspaceMembers.Add(new WorkspaceMember
+            {
+                UserId = ownerUser.Id,
+                TenantId = tenantId,
+                Role = WorkspaceRole.Owner,
+                Status = WorkspaceMemberStatus.Active,
+                Permissions = CenterPermissions.All,
+                CreatedAt = DateTime.UtcNow
+            });
+            await _dbContext.SaveChangesAsync(ct);
+
+            return ownerUser.Id;
         }
 
         // ══════════════════════════════════════════════════
@@ -624,9 +722,16 @@ namespace Infrastructure.Identity.Services
                 UserType    = user.UserType.ToString(),
             };
 
-            // Resolve the workspace + subscription for Teachers / Assistants.
-            var claims = await _userManager.GetClaimsAsync(user);
-            var tenantId = claims.FirstOrDefault(c => c.Type == ClaimConstants.Tenant)?.Value;
+            // Resolve the workspace + subscription for the CURRENTLY-SELECTED workspace.
+            // Read the tenant from the live JWT (current workspace) — NOT the persisted
+            // user claim, which always points at the user's original/individual tenant and
+            // would show the wrong subscription when they're inside a center workspace.
+            var tenantId = _currentUserService.TenantId;
+            if (string.IsNullOrEmpty(tenantId))
+            {
+                var claims = await _userManager.GetClaimsAsync(user);
+                tenantId = claims.FirstOrDefault(c => c.Type == ClaimConstants.Tenant)?.Value;
+            }
 
             if (!string.IsNullOrEmpty(tenantId))
             {

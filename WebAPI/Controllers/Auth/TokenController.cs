@@ -1,6 +1,7 @@
 ﻿using Application.Features.Identity.Tokens.Queries;
 using Application.Features.Tokens.Commands;
 using Application.Features.Tokens.DTOs;
+using Application.Features.Tokens.Queries;
 using Infrastructure.Identity;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -45,6 +46,15 @@ namespace WebAPI.Controllers.Auth
 
             var response = await Sender.Send(command);
             return Ok(response);
+        }
+
+        [HttpGet("workspaces")]
+        [Authorize]
+        [OpenApiOperation("Get My Workspaces", "Lists the active workspaces the current user belongs to (for the in-app switcher).")]
+        public async Task<IActionResult> GetMyWorkspacesAsync()
+        {
+            var query = new GetMyWorkspacesQuery { UserId = ClaimsPrincipalExtensions.GetUserId(User)! };
+            return Ok(await Sender.Send(query));
         }
 
         [HttpPost("logout")]
