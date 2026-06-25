@@ -63,6 +63,7 @@ namespace Infrastructure
                 .AddScoped<IStudentService, StudentService>()
                 .AddScoped<IAttendanceService, AttendanceService>()
                 .AddScoped<IGradeService, GradeService>()
+                .AddScoped<IParentInsightsService, ParentInsightsService>()
                 .AddScoped<INotificationService, NotificationService>()
                 .AddScoped<IMaterialService, MaterialService>()
                 .AddScoped<IAnnouncementService, AnnouncementService>()

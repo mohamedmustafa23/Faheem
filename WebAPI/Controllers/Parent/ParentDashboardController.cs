@@ -33,6 +33,14 @@ namespace WebAPI.Controllers.Parent
             return Ok(response);
         }
 
+        [HttpGet("children/{childId}/groups")]
+        [OpenApiOperation("Get Child Groups Overview", "Group-centric snapshot for a child: per group rank, attendance, grades average, and fees — powers the parent's group-by-group child screen.")]
+        public async Task<IActionResult> GetChildGroupsOverviewAsync(string childId)
+        {
+            var query = new GetChildGroupsOverviewQuery { ParentId = User.GetUserId()!, ChildId = childId };
+            return Ok(await Sender.Send(query));
+        }
+
         [HttpGet("children/{childId}/grades")]
         [OpenApiOperation("Get Child Grades", "Gets all grades for a specific linked child.")]
         public async Task<IActionResult> GetChildGradesAsync(string childId)
