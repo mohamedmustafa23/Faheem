@@ -152,7 +152,8 @@ namespace Infrastructure.Tenancy
                     PhoneNumber = u?.PhoneNumber ?? "",
                     Email = u?.Email ?? "",
                     Role = m.Role.ToString(),
-                    Status = m.Status.ToString()
+                    Status = m.Status.ToString(),
+                    Permissions = (int)m.Permissions
                 };
             })
             .OrderBy(x => x.Role)
@@ -486,6 +487,74 @@ namespace Infrastructure.Tenancy
             await _dbContext.SaveChangesAsync(ct);
 
             return "تم تحديث نسبة المدرّس.";
+        }
+
+        // ── Center owner: create a staff (employee) account ────────────────────
+        public async Task<string> CreateStaffAsync(string tenantId, string ownerUserId, RegisterCenterStaffRequest request, CancellationToken ct = default)
+        {
+            await EnsureOwnerAsync(tenantId, ownerUserId, ct);
+
+            var tenant = await _tenantStore.TryGetAsync(tenantId)
+                ?? throw new NotFoundException(["السنتر غير موجود."]);
+            if (tenant.Type != TenantType.Center)
+                throw new ConflictException(["مساحة العمل دي مش سنتر."]);
+
+            var existing = await _userManager.Users
+                .FirstOrDefaultAsync(u => u.Email == request.Email || u.PhoneNumber == request.PhoneNumber, ct);
+            if (existing != null)
+                throw new ConflictException(["الإيميل أو رقم الهاتف مسجّل بالفعل."]);
+
+            var staff = new ApplicationUser
+            {
+                FirstName = request.FirstName,
+                LastName = request.LastName,
+                Email = request.Email,
+                UserName = request.PhoneNumber,
+                PhoneNumber = request.PhoneNumber,
+                UserType = UserType.CenterStaff,
+                IsActive = true,
+                EmailConfirmed = true
+            };
+
+            var result = await _userManager.CreateAsync(staff, request.Password);
+            if (!result.Succeeded)
+                throw new IdentityException(result.Errors.Select(e => e.Description).ToList());
+
+            await _userManager.AddToRoleAsync(staff, RoleConstants.CenterStaff);
+            await _userManager.AddClaimAsync(staff, new Claim(ClaimConstants.Tenant, tenantId));
+
+            // Staff own no groups; their capability is exactly these owner-granted flags.
+            _dbContext.WorkspaceMembers.Add(new WorkspaceMember
+            {
+                UserId = staff.Id,
+                TenantId = tenantId,
+                Role = WorkspaceRole.Staff,
+                Status = WorkspaceMemberStatus.Active,
+                Permissions = (CenterPermissions)request.Permissions,
+                CreatedAt = DateTime.UtcNow
+            });
+            await _dbContext.SaveChangesAsync(ct);
+
+            return staff.Id;
+        }
+
+        // ── Center owner: update a member's capability flags ───────────────────
+        public async Task<string> SetMemberPermissionsAsync(string tenantId, string ownerUserId, string memberUserId, int permissions, CancellationToken ct = default)
+        {
+            await EnsureOwnerAsync(tenantId, ownerUserId, ct);
+
+            var membership = await _dbContext.WorkspaceMembers
+                .FirstOrDefaultAsync(m => m.TenantId == tenantId && m.UserId == memberUserId, ct)
+                ?? throw new NotFoundException(["المستخدم ده مش عضو في السنتر."]);
+
+            if (membership.Role == WorkspaceRole.Owner)
+                throw new ConflictException(["ميصحّش تعدّل صلاحيات صاحب السنتر."]);
+
+            membership.Permissions = (CenterPermissions)permissions;
+            await _dbContext.SaveChangesAsync(ct);
+
+            // New flags apply on the member's next token refresh (a few minutes) or re-login.
+            return "تم تحديث الصلاحيات.";
         }
 
         // The caller must be an active Owner of the given center.

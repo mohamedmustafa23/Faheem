@@ -7,11 +7,15 @@ namespace Domain.Enums
     /// (the individual teacher, or the center owner).</para>
     /// <para><see cref="Teacher"/> — a teacher operating inside a center; sees only their own groups.</para>
     /// <para><see cref="Assistant"/> — assists a teacher/center with limited permissions.</para>
+    /// <para><see cref="Staff"/> — a center employee (secretary/manager) whose capabilities
+    /// are exactly what the owner grants via the membership permission flags; owns no groups
+    /// but operates across the whole center.</para>
     /// </summary>
     public enum WorkspaceRole
     {
         Owner = 0,
         Teacher = 1,
-        Assistant = 2
+        Assistant = 2,
+        Staff = 3
     }
 }

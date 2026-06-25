@@ -8,10 +8,13 @@ namespace Application.Features.Centers.DTOs
         public string PhoneNumber { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
 
-        /// <summary>"Owner", "Teacher" or "Assistant".</summary>
+        /// <summary>"Owner", "Teacher", "Assistant" or "Staff".</summary>
         public string Role { get; set; } = string.Empty;
 
         /// <summary>"Active" or "Invited".</summary>
         public string Status { get; set; } = string.Empty;
+
+        /// <summary>The member's capability flags (CenterPermissions bitmask) — drives the permission editor.</summary>
+        public int Permissions { get; set; }
     }
 }

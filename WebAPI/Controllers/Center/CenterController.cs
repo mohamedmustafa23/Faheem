@@ -66,6 +66,33 @@ namespace WebAPI.Controllers.Center
             return Ok(await Sender.Send(command));
         }
 
+        [HttpPost("staff")]
+        [OpenApiOperation("Create Staff", "Center owner creates a staff (employee) account with the given capability flags.")]
+        public async Task<IActionResult> CreateStaffAsync([FromBody] RegisterCenterStaffRequest request)
+        {
+            var command = new CreateCenterStaffCommand
+            {
+                TenantId = User.GetTenant()!,
+                OwnerUserId = User.GetUserId()!,
+                Request = request
+            };
+            return Ok(await Sender.Send(command));
+        }
+
+        [HttpPut("members/{memberUserId}/permissions")]
+        [OpenApiOperation("Set Member Permissions", "Center owner updates a member's capability flags (staff/assistant).")]
+        public async Task<IActionResult> SetMemberPermissionsAsync(string memberUserId, [FromBody] SetMemberPermissionsRequest request)
+        {
+            var command = new SetMemberPermissionsCommand
+            {
+                TenantId = User.GetTenant()!,
+                OwnerUserId = User.GetUserId()!,
+                MemberUserId = memberUserId,
+                Request = request
+            };
+            return Ok(await Sender.Send(command));
+        }
+
         [HttpPut("members/{memberUserId}/share")]
         [OpenApiOperation("Set Teacher Share", "Sets the center's revenue cut (%) for a teacher member (owner only).")]
         public async Task<IActionResult> SetTeacherShareAsync(string memberUserId, [FromBody] SetTeacherShareRequest request)

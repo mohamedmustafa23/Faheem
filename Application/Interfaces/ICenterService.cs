@@ -33,5 +33,11 @@ namespace Application.Interfaces
 
         /// <summary>Center owner: one teacher's financial detail — totals + per-group breakdown (for the drill-in screen + statement).</summary>
         Task<CenterTeacherDetailDto> GetCenterTeacherDetailAsync(string tenantId, string ownerUserId, string teacherUserId, CancellationToken ct = default);
+
+        /// <summary>Center owner: creates a staff (employee) account in the center with the given capability flags.</summary>
+        Task<string> CreateStaffAsync(string tenantId, string ownerUserId, RegisterCenterStaffRequest request, CancellationToken ct = default);
+
+        /// <summary>Center owner: updates a member's capability flags (used for staff/assistants).</summary>
+        Task<string> SetMemberPermissionsAsync(string tenantId, string ownerUserId, string memberUserId, int permissions, CancellationToken ct = default);
     }
 }

@@ -11,7 +11,7 @@ using NSwag.Annotations;
 namespace WebAPI.Controllers.Teacher
 {
     [Route("api/teacher/groups")]
-    [Authorize(Roles = $"{RoleConstants.CenterOwner},{RoleConstants.Teacher},{RoleConstants.Assistant}")]
+    [Authorize(Roles = $"{RoleConstants.CenterOwner},{RoleConstants.CenterStaff},{RoleConstants.Teacher},{RoleConstants.Assistant}")]
     [OpenApiTag("Teacher - Groups", Description = "Endpoints for teachers to manage their study groups")]
     public class TeacherGroupsController : BaseApiController
     {

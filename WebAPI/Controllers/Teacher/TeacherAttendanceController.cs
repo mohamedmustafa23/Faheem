@@ -11,7 +11,7 @@ using NSwag.Annotations;
 namespace WebAPI.Controllers.Teacher
 {
     [Route("api/teacher/attendance")]
-    [Authorize(Roles = $"{RoleConstants.CenterOwner},{RoleConstants.Teacher},{RoleConstants.Assistant}")]
+    [Authorize(Roles = $"{RoleConstants.CenterOwner},{RoleConstants.CenterStaff},{RoleConstants.Teacher},{RoleConstants.Assistant}")]
     [OpenApiTag("Teacher - Attendance", Description = "Endpoints for managing manual and QR attendance")]
     public class TeacherAttendanceController : BaseApiController
     {

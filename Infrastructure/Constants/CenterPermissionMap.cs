@@ -13,8 +13,15 @@ namespace Infrastructure.Constants
         public static IEnumerable<string> ToPermissionNames(CenterPermissions permissions)
         {
             var names = new HashSet<string>();
+            if (permissions == CenterPermissions.None) return names;
 
             void Add(string action, string feature) => names.Add(AppPermission.NameFor(action, feature));
+
+            // Baseline for ANY granted member: they can see groups + sessions so they can
+            // navigate to whatever they're allowed to act on. Write actions come from the
+            // specific flags below.
+            Add(AppAction.Read, AppFeature.Groups);
+            Add(AppAction.Read, AppFeature.Sessions);
 
             if (permissions.HasFlag(CenterPermissions.ManageGroups))
             {

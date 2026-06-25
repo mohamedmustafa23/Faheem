@@ -7,5 +7,6 @@
         Student = 2,
         Parent = 3,
         CenterOwner = 4,
+        CenterStaff = 5,
     }
 }
