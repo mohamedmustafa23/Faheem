@@ -132,6 +132,18 @@ namespace WebAPI.Controllers.Center
             return Ok(await Sender.Send(query));
         }
 
+        [HttpGet("my-earnings")]
+        [OpenApiOperation("Get My Center Earnings", "The current teacher's own share %, collected, center/teacher cut + per-group breakdown in this center.")]
+        public async Task<IActionResult> GetMyEarningsAsync()
+        {
+            var query = new GetMyCenterEarningsQuery
+            {
+                TenantId = User.GetTenant()!,
+                TeacherUserId = User.GetUserId()!
+            };
+            return Ok(await Sender.Send(query));
+        }
+
         // ── Invited-user operations (independent of the selected workspace) ──
 
         [HttpGet("invites")]

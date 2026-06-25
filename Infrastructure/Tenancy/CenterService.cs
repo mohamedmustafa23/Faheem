@@ -386,6 +386,25 @@ namespace Infrastructure.Tenancy
                                        && m.Status == WorkspaceMemberStatus.Active, ct)
                 ?? throw new NotFoundException(["المدرّس ده مش عضو في السنتر."]);
 
+            return await BuildTeacherDetailAsync(tenantId, teacherUserId, membership, ct);
+        }
+
+        // ── Center teacher: their OWN earnings in the current center (share + cuts) ──
+        public async Task<CenterTeacherDetailDto> GetMyCenterEarningsAsync(string tenantId, string teacherUserId, CancellationToken ct = default)
+        {
+            var membership = await _dbContext.WorkspaceMembers
+                .FirstOrDefaultAsync(m => m.TenantId == tenantId
+                                       && m.UserId == teacherUserId
+                                       && m.Role == WorkspaceRole.Teacher
+                                       && m.Status == WorkspaceMemberStatus.Active, ct)
+                ?? throw new NotFoundException(["إنت مش مدرّس في السنتر ده."]);
+
+            return await BuildTeacherDetailAsync(tenantId, teacherUserId, membership, ct);
+        }
+
+        // Shared computation for the owner drill-in and the teacher's own self view.
+        private async Task<CenterTeacherDetailDto> BuildTeacherDetailAsync(string tenantId, string teacherUserId, WorkspaceMember membership, CancellationToken ct)
+        {
             var name = await _dbContext.Users
                 .Where(u => u.Id == teacherUserId)
                 .Select(u => u.FirstName + " " + u.LastName)
