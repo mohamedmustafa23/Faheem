@@ -38,6 +38,15 @@ namespace WebAPI.Controllers.Teacher
             return Ok(response);
         }
 
+        [HttpPut("{assistantId}/permissions")]
+        [OpenApiOperation("Set Assistant Permissions", "Updates the capability flags the teacher grants this assistant.")]
+        public async Task<IActionResult> SetPermissionsAsync([FromRoute] string assistantId, [FromBody] SetAssistantPermissionsCommand command)
+        {
+            command.AssistantUserId = assistantId;
+            command.TeacherTenantId = User.GetTenant()!;
+            return Ok(await Sender.Send(command));
+        }
+
         [HttpDelete("{assistantId}")]
         [OpenApiOperation("Remove Assistant",
             "Soft-removes an assistant (deactivates + strips workspace claim). Audit history is preserved.")]

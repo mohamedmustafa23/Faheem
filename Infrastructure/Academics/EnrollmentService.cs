@@ -185,6 +185,7 @@ namespace Infrastructure.Academics
         // and returns the code for the teacher to hand to the student / parent.
         public async Task<string> ManualAddStudentAsync(ManualAddStudentRequest request, string tenantId, CancellationToken ct = default)
         {
+            // Input (name/stage/grade) is validated by ManualAddStudentCommandValidator.
             var group = await _dbContext.Groups
                 .FirstOrDefaultAsync(g => g.Id == request.GroupId, ct);
             if (group == null) throw new NotFoundException(["Group not found."]);

@@ -22,6 +22,7 @@ namespace Application.Interfaces
         // Assistant
         Task<string> RegisterAssistantAsync(RegisterAssistantRequest request, string teacherTenantId, CancellationToken ct = default);
         Task<List<AssistantDto>> GetTeacherAssistantsAsync(string teacherTenantId, CancellationToken ct = default);
+        Task<string> SetAssistantPermissionsAsync(string assistantUserId, string teacherTenantId, int permissions, CancellationToken ct = default);
         Task<string> RemoveAssistantAsync(string assistantUserId, string teacherTenantId, CancellationToken ct = default);
 
         // Profile

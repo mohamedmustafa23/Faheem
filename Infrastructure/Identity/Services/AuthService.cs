@@ -572,6 +572,13 @@ namespace Infrastructure.Identity.Services
         // ══════════════════════════════════════════════════
         public async Task<string> RegisterAssistantAsync(RegisterAssistantRequest request, string teacherTenantId, CancellationToken ct = default)
         {
+            // A teacher's assistant (secretary) is a personal-workspace concept: it manages
+            // the teacher's own individual workspace only. Staff inside a center is the
+            // owner's job (center Staff), so refuse to attach an assistant to a center.
+            var tenant = await _tenantStore.TryGetByIdentifierAsync(teacherTenantId);
+            if (tenant?.Type == TenantType.Center)
+                throw new ConflictException(["السكرتيرة بتتعمل من مساحتك الشخصية، مش من داخل السنتر."]);
+
             var existingUser = await _userManager.Users.FirstOrDefaultAsync(u => u.Email == request.Email || u.PhoneNumber == request.PhoneNumber, ct);
             if (existingUser != null) throw new ConflictException(["This email or phone number is already registered."]);
 
@@ -593,13 +600,16 @@ namespace Infrastructure.Identity.Services
             await _userManager.AddToRoleAsync(assistantUser, RoleConstants.Assistant);
             await _userManager.AddClaimAsync(assistantUser, new Claim(ClaimConstants.Tenant, teacherTenantId));
 
-            // Mirror the claim as a workspace membership (Assistant role in the teacher's workspace).
+            // Mirror the claim as a workspace membership (Assistant role in the teacher's
+            // workspace). Capability comes from the teacher-granted flags — the Assistant
+            // identity role itself has no base permissions.
             _dbContext.WorkspaceMembers.Add(new WorkspaceMember
             {
                 UserId = assistantUser.Id,
                 TenantId = teacherTenantId,
                 Role = WorkspaceRole.Assistant,
                 Status = WorkspaceMemberStatus.Active,
+                Permissions = (CenterPermissions)request.Permissions,
                 CreatedAt = DateTime.UtcNow
             });
             await _dbContext.SaveChangesAsync(ct);
@@ -648,7 +658,30 @@ namespace Infrastructure.Identity.Services
                 })
                 .ToListAsync(ct);
 
+            // Attach each assistant's capability flags from their workspace membership.
+            var permsByUser = await _dbContext.WorkspaceMembers
+                .Where(m => m.TenantId == teacherTenantId && assistantsInRole.Contains(m.UserId))
+                .ToDictionaryAsync(m => m.UserId, m => (int)m.Permissions, ct);
+            foreach (var u in users) u.Permissions = permsByUser.GetValueOrDefault(u.Id);
+
             return users.OrderBy(a => a.FirstName).ToList();
+        }
+
+        // ══════════════════════════════════════════════════
+        // Assistant — Set Permissions
+        // ══════════════════════════════════════════════════
+        public async Task<string> SetAssistantPermissionsAsync(string assistantUserId, string teacherTenantId, int permissions, CancellationToken ct = default)
+        {
+            var membership = await _dbContext.WorkspaceMembers
+                .FirstOrDefaultAsync(m => m.UserId == assistantUserId
+                                       && m.TenantId == teacherTenantId
+                                       && m.Role == WorkspaceRole.Assistant, ct)
+                ?? throw new NotFoundException(["المساعد ده مش تابع لمساحتك."]);
+
+            membership.Permissions = (CenterPermissions)permissions;
+            await _dbContext.SaveChangesAsync(ct);
+
+            return "تم تحديث صلاحيات المساعد.";
         }
 
         // ══════════════════════════════════════════════════
