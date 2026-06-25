@@ -24,5 +24,14 @@ namespace Application.Interfaces
 
         /// <summary>Admin/payment: activates or renews a center subscription (seat limit + extension). Returns the new valid-until date.</summary>
         Task<DateTime> SetCenterSubscriptionAsync(SetCenterSubscriptionRequest request, CancellationToken ct = default);
+
+        /// <summary>Center owner: per-teacher revenue report (collected / center cut / teacher cut) + grand totals.</summary>
+        Task<CenterFinancialsDto> GetCenterFinancialsAsync(string tenantId, string ownerUserId, CancellationToken ct = default);
+
+        /// <summary>Center owner: sets the center's revenue cut (%) for a teacher member. Null clears it.</summary>
+        Task<string> SetTeacherShareAsync(string tenantId, string ownerUserId, string teacherUserId, decimal? sharePercent, CancellationToken ct = default);
+
+        /// <summary>Center owner: one teacher's financial detail — totals + per-group breakdown (for the drill-in screen + statement).</summary>
+        Task<CenterTeacherDetailDto> GetCenterTeacherDetailAsync(string tenantId, string ownerUserId, string teacherUserId, CancellationToken ct = default);
     }
 }

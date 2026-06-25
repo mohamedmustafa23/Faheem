@@ -15,5 +15,10 @@ namespace Application.Features.Groups.DTOs
         public int EnrolledStudentsCount { get; set; }
         public int? CurrentCycleSessionsCompleted { get; set; }
         public bool IsPinned { get; set; }
+
+        /// <summary>The teacher who owns this group. Used by the center owner to filter/label
+        /// groups by teacher. For an individual teacher this is just themselves.</summary>
+        public string? OwnerUserId { get; set; }
+        public string? OwnerName { get; set; }
     }
 }

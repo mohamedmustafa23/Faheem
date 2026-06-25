@@ -139,6 +139,12 @@ namespace Infrastructure.Academics
                         .Select(c => (int?)c.SessionsCompleted)
                         .FirstOrDefault(),
                     IsPinned = g.IsPinned,
+                    OwnerUserId = g.OwnerUserId,
+                    // Owning teacher's name — lets the center owner label/filter groups by teacher.
+                    OwnerName = _dbContext.Users
+                        .Where(u => u.Id == g.OwnerUserId)
+                        .Select(u => u.FirstName + " " + u.LastName)
+                        .FirstOrDefault(),
                 })
                 .ToListAsync(ct);
 

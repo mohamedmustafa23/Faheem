@@ -65,14 +65,13 @@ namespace WebAPI.Controllers.Teacher
             return Ok(response);
         }
 
-        [HttpPut("occurrences/{occurrenceId}/qr/generate")]
-        [ShouldHavePermission(AppAction.Update, AppFeature.Attendance)]
-        [OpenApiOperation("Generate/Refresh QR Code", "Generates a new secure QR token for the occurrence. Invalidates any previous tokens.")]
-        public async Task<IActionResult> GenerateQrTokenAsync(Guid occurrenceId)
+        [HttpPost("scan")]
+        [ShouldHavePermission(AppAction.Create, AppFeature.Attendance)]
+        [OpenApiOperation("Scan Student Code", "Reads a student's signed check-in code and marks them present in the session it names — one camera, no session switching. Used by both individual teachers and centers.")]
+        public async Task<IActionResult> ScanStudentCodeAsync([FromBody] CenterScanRequest request)
         {
-            var command = new GenerateQrCommand { OccurrenceId = occurrenceId, TenantId = User.GetTenant()! };
-            var response = await Sender.Send(command);
-            return Ok(response);
+            var command = new CenterScanCommand { TenantId = User.GetTenant()!, Request = request };
+            return Ok(await Sender.Send(command));
         }
     }
 }

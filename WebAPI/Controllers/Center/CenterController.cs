@@ -66,6 +66,45 @@ namespace WebAPI.Controllers.Center
             return Ok(await Sender.Send(command));
         }
 
+        [HttpPut("members/{memberUserId}/share")]
+        [OpenApiOperation("Set Teacher Share", "Sets the center's revenue cut (%) for a teacher member (owner only).")]
+        public async Task<IActionResult> SetTeacherShareAsync(string memberUserId, [FromBody] SetTeacherShareRequest request)
+        {
+            var command = new SetTeacherShareCommand
+            {
+                TenantId = User.GetTenant()!,
+                OwnerUserId = User.GetUserId()!,
+                TeacherUserId = memberUserId,
+                Request = request
+            };
+            return Ok(await Sender.Send(command));
+        }
+
+        [HttpGet("financials")]
+        [OpenApiOperation("Get Center Financials", "Per-teacher revenue report (collected, center cut, teacher cut) + grand totals (owner only).")]
+        public async Task<IActionResult> GetFinancialsAsync()
+        {
+            var query = new GetCenterFinancialsQuery
+            {
+                TenantId = User.GetTenant()!,
+                OwnerUserId = User.GetUserId()!
+            };
+            return Ok(await Sender.Send(query));
+        }
+
+        [HttpGet("financials/{teacherId}")]
+        [OpenApiOperation("Get Teacher Financial Detail", "One teacher's totals + per-group breakdown for the drill-in screen and statement (owner only).")]
+        public async Task<IActionResult> GetTeacherFinancialDetailAsync(string teacherId)
+        {
+            var query = new GetCenterTeacherDetailQuery
+            {
+                TenantId = User.GetTenant()!,
+                OwnerUserId = User.GetUserId()!,
+                TeacherUserId = teacherId
+            };
+            return Ok(await Sender.Send(query));
+        }
+
         // ── Invited-user operations (independent of the selected workspace) ──
 
         [HttpGet("invites")]

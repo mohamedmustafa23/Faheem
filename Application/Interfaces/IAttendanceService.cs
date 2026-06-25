@@ -8,8 +8,13 @@ namespace Application.Interfaces
         Task<List<StudentAttendanceDto>> GetOccurrenceAttendanceAsync(Guid occurrenceId, string tenantId, CancellationToken ct = default);
         Task<string> SaveAttendanceAsync(SaveAttendanceRequest request, string tenantId, CancellationToken ct = default);
         Task<string> EndOccurrenceAsync(Guid occurrenceId, string tenantId, CancellationToken ct = default);
-        Task<string> GenerateQrTokenAsync(Guid occurrenceId, string tenantId, CancellationToken ct = default);
-        Task<string> ScanQrCodeAsync(ScanQrRequest request, string studentId, CancellationToken ct = default);
+
+        // ── Attendance by code: student shows a signed code, teacher/center scans it ──
+        /// <summary>Student: issues a short-lived signed check-in code for a session they're enrolled in today.</summary>
+        Task<CheckInCodeDto> GenerateCheckInTokenAsync(string studentId, Guid occurrenceId, CancellationToken ct = default);
+
+        /// <summary>Center scanner: verifies a student's check-in code and marks them present in the session it names.</summary>
+        Task<CenterScanResultDto> ScanCenterCodeAsync(string scannerTenantId, string token, CancellationToken ct = default);
 
         // History & reporting
         Task<List<StudentAttendanceSummaryDto>> GetGroupAttendanceSummaryAsync(Guid groupId, string tenantId, CancellationToken ct = default);

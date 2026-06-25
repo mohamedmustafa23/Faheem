@@ -39,8 +39,6 @@ namespace Domain.Entities
 
         public SessionStatus Status { get; set; } = SessionStatus.Scheduled;
 
-        public string? QrToken { get; set; }
-
         public string TenantId { get; set; } = string.Empty;
 
         public ICollection<AttendanceRecord> AttendanceRecords { get; set; } = new List<AttendanceRecord>();
