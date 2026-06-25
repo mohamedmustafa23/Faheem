@@ -175,6 +175,13 @@ namespace Infrastructure.Tenancy
             if (membership.Role == WorkspaceRole.Owner)
                 throw new ConflictException(["ميصحّش تشيل صاحب السنتر."]);
 
+            // A teacher who still owns groups can't be removed — the groups would be
+            // orphaned in the center. The owner deletes the teacher's groups first.
+            var ownedGroups = await _dbContext.Groups
+                .CountAsync(g => g.TenantId == tenantId && g.OwnerUserId == memberUserId, ct);
+            if (ownedGroups > 0)
+                throw new ConflictException([$"المدرّس ده عنده {ownedGroups} مجموعة في السنتر — احذف مجموعاته الأول وبعدين شيله."]);
+
             _dbContext.WorkspaceMembers.Remove(membership);
 
             // Strip the tenant claim + revoke active sessions so access is lost immediately.
