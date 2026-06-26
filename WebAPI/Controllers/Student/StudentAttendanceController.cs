@@ -14,13 +14,12 @@ namespace WebAPI.Controllers.Student
     [OpenApiTag("Student - Attendance", Description = "Endpoints for student attendance (QR Scan & History)")]
     public class StudentAttendanceController : BaseApiController
     {
-        [HttpPost("scan")]
-        [OpenApiOperation("Scan QR Code", "Records student attendance using the scanned QR code token.")]
-        public async Task<IActionResult> ScanQrCodeAsync([FromBody] ScanQrRequest request)
+        [HttpGet("checkin-code/{occurrenceId}")]
+        [OpenApiOperation("Get Check-in Code", "Issues a short-lived signed code for the student to display; a center scanner reads it to mark attendance in this session.")]
+        public async Task<IActionResult> GetCheckInCodeAsync(Guid occurrenceId)
         {
-            var command = new ScanQrCommand { Request = request, StudentId = User.GetUserId()! };
-            var response = await Sender.Send(command);
-            return Ok(response);
+            var query = new GenerateCheckInCodeQuery { StudentId = User.GetUserId()!, OccurrenceId = occurrenceId };
+            return Ok(await Sender.Send(query));
         }
 
         [HttpGet("my")]

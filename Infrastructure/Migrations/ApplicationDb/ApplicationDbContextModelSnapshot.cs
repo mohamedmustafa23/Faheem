@@ -134,6 +134,10 @@ namespace Infrastructure.Migrations.ApplicationDb
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<string>("OwnerUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
                     b.Property<int?>("SessionsPerCycle")
                         .HasColumnType("int");
 
@@ -156,6 +160,9 @@ namespace Infrastructure.Migrations.ApplicationDb
 
                     b.HasIndex("EnrollmentCode")
                         .IsUnique();
+
+                    b.HasIndex("OwnerUserId")
+                        .HasFilter("[OwnerUserId] IS NOT NULL");
 
                     b.ToTable("Groups", "Academics");
 
@@ -475,9 +482,6 @@ namespace Infrastructure.Migrations.ApplicationDb
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("QrToken")
-                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid?>("SessionId")
                         .HasColumnType("uniqueidentifier");
@@ -934,6 +938,52 @@ namespace Infrastructure.Migrations.ApplicationDb
                     b.ToTable("UserRefreshTokens", "Identity");
                 });
 
+            modelBuilder.Entity("Infrastructure.Identity.Models.WorkspaceMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Permissions")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<decimal?>("SharePercent")
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("UserId", "TenantId")
+                        .IsUnique();
+
+                    b.ToTable("WorkspaceMembers", "Identity");
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<string>", b =>
                 {
                     b.Property<int>("Id")
@@ -1209,6 +1259,17 @@ namespace Infrastructure.Migrations.ApplicationDb
                 {
                     b.HasOne("Infrastructure.Identity.Models.ApplicationUser", "User")
                         .WithMany("RefreshTokens")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Infrastructure.Identity.Models.WorkspaceMember", b =>
+                {
+                    b.HasOne("Infrastructure.Identity.Models.ApplicationUser", "User")
+                        .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

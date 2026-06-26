@@ -6,6 +6,7 @@ namespace Application.Interfaces
     public interface IAuthService
     {
         Task<string> RegisterTeacherAsync(RegisterTeacherRequest request, CancellationToken ct = default);
+        Task<string> RegisterCenterAsync(RegisterCenterRequest request, CancellationToken ct = default);
         Task<string> RegisterStudentAsync(RegisterStudentRequest request, CancellationToken ct = default);
         Task<string> RegisterParentAsync(RegisterParentRequest request, CancellationToken ct = default);
 
@@ -21,6 +22,7 @@ namespace Application.Interfaces
         // Assistant
         Task<string> RegisterAssistantAsync(RegisterAssistantRequest request, string teacherTenantId, CancellationToken ct = default);
         Task<List<AssistantDto>> GetTeacherAssistantsAsync(string teacherTenantId, CancellationToken ct = default);
+        Task<string> SetAssistantPermissionsAsync(string assistantUserId, string teacherTenantId, int permissions, CancellationToken ct = default);
         Task<string> RemoveAssistantAsync(string assistantUserId, string teacherTenantId, CancellationToken ct = default);
 
         // Profile

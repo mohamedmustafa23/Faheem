@@ -26,6 +26,15 @@ namespace WebAPI.Controllers.Teacher
             return Ok(response);
         }
 
+        [HttpDelete("exams/{examId}")]
+        [ShouldHavePermission(AppAction.Update, AppFeature.Grades)]
+        [OpenApiOperation("Delete Exam", "Deletes an exam and all its recorded scores.")]
+        public async Task<IActionResult> DeleteExamAsync(Guid examId)
+        {
+            var command = new DeleteExamCommand { ExamId = examId, TenantId = User.GetTenant()! };
+            return Ok(await Sender.Send(command));
+        }
+
         [HttpPut("exams/save-scores")]
         [ShouldHavePermission(AppAction.Update, AppFeature.Grades)]
         [OpenApiOperation("Save/Update Grades", "Saves or updates scores for specific students. Can be called multiple times for partial grading.")]

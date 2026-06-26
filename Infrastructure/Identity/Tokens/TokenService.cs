@@ -2,6 +2,7 @@
 using Application.Exceptions;
 using Application.Features.Tokens.DTOs;
 using Application.Interfaces;
+using Domain.Enums;
 using Finbuckle.MultiTenant.Abstractions;
 using Infrastructure.Constants;
 using Infrastructure.Contexts;
@@ -87,8 +88,23 @@ namespace Infrastructure.Identity.Tokens
             if (!userInDb.EmailConfirmed)
                 throw new UnauthorizedException(["Email Not Verified"]);
 
+            // Resolve the user's active workspaces — the source of truth for which
+            // tenant the session is scoped to.
+            var memberships = await _dbContext.WorkspaceMembers
+                .Where(m => m.UserId == userInDb.Id && m.Status == WorkspaceMemberStatus.Active)
+                .ToListAsync();
 
-            return await GenerateTokenAndUpdateUserAsync(userInDb);
+            // 0 memberships (students/parents) or 1 (a normal teacher/assistant) →
+            // behave exactly as before: issue a full token straight away. For the
+            // single-workspace case the tenant is that one membership.
+            if (memberships.Count <= 1)
+            {
+                var singleTenantId = memberships.Count == 1 ? memberships[0].TenantId : null;
+                return await GenerateTokenAndUpdateUserAsync(userInDb, singleTenantId);
+            }
+
+            // ≥2 workspaces → the user must choose one before we issue a full session.
+            return await BuildWorkspaceSelectionResponseAsync(userInDb, memberships);
         }
 
         // Refresh Token
@@ -131,16 +147,19 @@ namespace Infrastructure.Identity.Tokens
             _dbContext.UserRefreshTokens.Update(storedToken);
             await _dbContext.SaveChangesAsync();
 
-            return await GenerateTokenAndUpdateUserAsync(userInDb);
+            // Keep the user in the SAME workspace across a refresh — carry the tenant
+            // from the (now-expired) access token instead of re-resolving it.
+            var currentTenantId = userPrincipal.FindFirstValue(ClaimConstants.Tenant);
+            return await GenerateTokenAndUpdateUserAsync(userInDb, currentTenantId);
         }
 
         // ══════════════════════════════════════════════════
         // Generate Token + Update User
         // ══════════════════════════════════════════════════
-        private async Task<TokenResponse> GenerateTokenAndUpdateUserAsync(ApplicationUser user)
+        private async Task<TokenResponse> GenerateTokenAndUpdateUserAsync(ApplicationUser user, string? selectedTenantId)
         {
             string jti = Guid.NewGuid().ToString();
-            var jwt = await GenerateTokenAsync(user, jti);
+            var jwt = await GenerateTokenAsync(user, jti, selectedTenantId);
             string plainRefreshToken = GenerateRefreshToken();
 
             var expiredTokens = await _dbContext.UserRefreshTokens
@@ -175,13 +194,98 @@ namespace Infrastructure.Identity.Tokens
         }
 
         // ══════════════════════════════════════════════════
+        // Workspace selection / switching
+        // ══════════════════════════════════════════════════
+        public async Task<TokenResponse> SelectWorkspaceAsync(string userId, string tenantId)
+        {
+            var user = await _userManager.FindByIdAsync(userId)
+                ?? throw new UnauthorizedException(["Authentication failed"]);
+
+            if (string.IsNullOrWhiteSpace(tenantId))
+                throw new UnauthorizedException(["A workspace must be specified."]);
+
+            // The user can only sign into a workspace they're an active member of.
+            var membership = await _dbContext.WorkspaceMembers
+                .FirstOrDefaultAsync(m => m.UserId == userId
+                                       && m.TenantId == tenantId
+                                       && m.Status == WorkspaceMemberStatus.Active);
+
+            if (membership == null)
+                throw new ForbiddenException(["You don't have access to this workspace."]);
+
+            return await GenerateTokenAndUpdateUserAsync(user, tenantId);
+        }
+
+        // Builds the "pick a workspace" response: a short-lived account token (no tenant,
+        // no permissions — only good for /select-workspace) plus the list of choices.
+        private async Task<TokenResponse> BuildWorkspaceSelectionResponseAsync(
+            ApplicationUser user, List<WorkspaceMember> memberships)
+        {
+            return new TokenResponse
+            {
+                JwtToken = GenerateAccountToken(user),
+                RefreshToken = string.Empty,
+                RequiresWorkspaceSelection = true,
+                Workspaces = await MapWorkspaceOptionsAsync(memberships)
+            };
+        }
+
+        public async Task<List<WorkspaceOption>> GetUserWorkspacesAsync(string userId)
+        {
+            var memberships = await _dbContext.WorkspaceMembers
+                .Where(m => m.UserId == userId && m.Status == WorkspaceMemberStatus.Active)
+                .ToListAsync();
+
+            return await MapWorkspaceOptionsAsync(memberships);
+        }
+
+        private async Task<List<WorkspaceOption>> MapWorkspaceOptionsAsync(List<WorkspaceMember> memberships)
+        {
+            var workspaces = new List<WorkspaceOption>();
+            foreach (var m in memberships)
+            {
+                var tenantInfo = await _tenantStore.TryGetAsync(m.TenantId);
+                workspaces.Add(new WorkspaceOption
+                {
+                    TenantId = m.TenantId,
+                    Name = tenantInfo?.Name ?? m.TenantId,
+                    Type = (tenantInfo?.Type ?? TenantType.Individual).ToString(),
+                    Role = m.Role.ToString()
+                });
+            }
+            return workspaces;
+        }
+
+        // A minimal, short-lived token that authenticates the user but carries no tenant
+        // and no permissions — its only purpose is to authorise /select-workspace.
+        private string GenerateAccountToken(ApplicationUser user)
+        {
+            var claims = new List<Claim>
+            {
+                new(JwtRegisteredClaimNames.Sub, user.Id),
+                new(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty),
+                new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new("pre_auth", "true"),
+            };
+
+            var token = new JwtSecurityToken(
+                issuer: _jwtSettings.Issuer,
+                audience: _jwtSettings.Audience,
+                claims: claims,
+                expires: DateTime.UtcNow.AddMinutes(10),
+                signingCredentials: GenerateSigningCredentials());
+
+            return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        // ══════════════════════════════════════════════════
         // Generate JWT
         // ══════════════════════════════════════════════════
-        private async Task<string> GenerateTokenAsync(ApplicationUser user, string jti)
+        private async Task<string> GenerateTokenAsync(ApplicationUser user, string jti, string? selectedTenantId)
         {
             return GenerateEncryptedToken(
                 GenerateSigningCredentials(),
-                await GetUserClaimsAsync(user, jti)); 
+                await GetUserClaimsAsync(user, jti, selectedTenantId));
         }
 
         private string GenerateEncryptedToken(SigningCredentials signingCredentials, IEnumerable<Claim> claims)
@@ -207,7 +311,7 @@ namespace Infrastructure.Identity.Tokens
         // ══════════════════════════════════════════════════
         // User Claims + Permissions
         // ══════════════════════════════════════════════════
-        private async Task<IEnumerable<Claim>> GetUserClaimsAsync(ApplicationUser user, string jti)
+        private async Task<IEnumerable<Claim>> GetUserClaimsAsync(ApplicationUser user, string jti, string? selectedTenantId)
         {
             var userClaims = await _userManager.GetClaimsAsync(user);
             var userRoles = await _userManager.GetRolesAsync(user);
@@ -224,21 +328,47 @@ namespace Infrastructure.Identity.Tokens
             };
 
             bool isSubscriptionExpired = false;
-            var tenantIdClaim = userClaims.FirstOrDefault(c => c.Type == ClaimConstants.Tenant)?.Value;
+            var centerPermissions = CenterPermissions.None;
+            // The tenant is the workspace the user selected at login — NOT a standalone
+            // user claim (a user can now belong to several workspaces).
+            var tenantIdClaim = selectedTenantId;
 
             if (!string.IsNullOrEmpty(tenantIdClaim))
             {
+                claims.Add(new Claim(ClaimConstants.Tenant, tenantIdClaim));
+
+                // Record the user's role in this workspace so per-request scoping
+                // (e.g. a center member teacher only seeing their own groups) can rely
+                // on the token instead of hitting the DB on every query.
+                var membership = await _dbContext.WorkspaceMembers
+                    .FirstOrDefaultAsync(m => m.UserId == user.Id
+                                           && m.TenantId == tenantIdClaim
+                                           && m.Status == WorkspaceMemberStatus.Active);
+                if (membership != null)
+                {
+                    claims.Add(new Claim(ClaimConstants.WorkspaceRole, membership.Role.ToString()));
+                    // Operational capabilities this member was granted inside the workspace.
+                    centerPermissions = membership.Permissions;
+                }
+
                 var tenantInfo = await _tenantStore.TryGetAsync(tenantIdClaim);
                 if (tenantInfo != null)
                 {
-                    if (!tenantInfo.IsActive)
+                    // A center owner may log in even while the center is inactive so they can
+                    // SEE the "not subscribed yet / expired" state and renew. Everyone else is
+                    // blocked when their workspace is deactivated.
+                    var isCenterOwner = membership?.Role == WorkspaceRole.Owner
+                                        && tenantInfo.Type == TenantType.Center;
+
+                    if (!tenantInfo.IsActive && !isCenterOwner)
                         throw new UnauthorizedException(["Your workspace is deactivated. Please contact platform support."]);
 
-                    if (tenantInfo.ValidUpTo < DateTime.UtcNow)
+                    if (!tenantInfo.IsActive || tenantInfo.ValidUpTo < DateTime.UtcNow)
                     {
                         isSubscriptionExpired = true;
                     }
 
+                    claims.Add(new Claim("Tenant_Type", tenantInfo.Type.ToString()));
                     claims.Add(new Claim("Tenant_IsActive", tenantInfo.IsActive.ToString()));
                     claims.Add(new Claim("Tenant_ValidUpTo", tenantInfo.ValidUpTo.ToString("O")));
                     claims.Add(new Claim("Tenant_IsExpired", isSubscriptionExpired.ToString())); 
@@ -272,7 +402,22 @@ namespace Infrastructure.Identity.Tokens
                     }
                 }
             }
-            var allClaims = claims.Union(roleClaims).Union(userClaims).Union(permissionClaims);
+            // Center-membership capability flags widen what this member can do in the
+            // selected workspace, on top of their Identity-role permissions. When the
+            // subscription has lapsed, only read access survives (same rule as above).
+            foreach (var permissionName in CenterPermissionMap.ToPermissionNames(centerPermissions))
+            {
+                if (isSubscriptionExpired && !permissionName.EndsWith($".{AppAction.Read}"))
+                    continue;
+                permissionClaims.Add(new Claim(ClaimConstants.Permission, permissionName));
+            }
+
+            // Exclude any standalone tenant claim from the DB — the authoritative tenant
+            // is the selected workspace, already added above.
+            var allClaims = claims
+                .Union(roleClaims)
+                .Union(userClaims.Where(c => c.Type != ClaimConstants.Tenant))
+                .Union(permissionClaims);
 
             return allClaims
                    .Select(c => new { c.Type, c.Value })

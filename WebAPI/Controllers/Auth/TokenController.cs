@@ -1,6 +1,8 @@
 ﻿using Application.Features.Identity.Tokens.Queries;
 using Application.Features.Tokens.Commands;
 using Application.Features.Tokens.DTOs;
+using Application.Features.Tokens.Queries;
+using Infrastructure.Identity;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -29,6 +31,30 @@ namespace WebAPI.Controllers.Auth
         {
             var response = await Sender.Send(new GetRefreshTokenQuery { RefreshTokenRequest = request });
             return Ok(response);
+        }
+
+        [HttpPost("select-workspace")]
+        [Authorize]
+        [OpenApiOperation("Select Workspace", "Exchanges the account token for a full access token scoped to the chosen workspace (also used to switch workspace).")]
+        public async Task<IActionResult> SelectWorkspaceAsync([FromBody] SelectWorkspaceRequest request)
+        {
+            var command = new SelectWorkspaceCommand
+            {
+                UserId = ClaimsPrincipalExtensions.GetUserId(User)!,
+                TenantId = request.TenantId
+            };
+
+            var response = await Sender.Send(command);
+            return Ok(response);
+        }
+
+        [HttpGet("workspaces")]
+        [Authorize]
+        [OpenApiOperation("Get My Workspaces", "Lists the active workspaces the current user belongs to (for the in-app switcher).")]
+        public async Task<IActionResult> GetMyWorkspacesAsync()
+        {
+            var query = new GetMyWorkspacesQuery { UserId = ClaimsPrincipalExtensions.GetUserId(User)! };
+            return Ok(await Sender.Send(query));
         }
 
         [HttpPost("logout")]

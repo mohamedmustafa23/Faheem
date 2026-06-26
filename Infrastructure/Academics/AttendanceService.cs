@@ -1,3 +1,4 @@
+using Application;
 using Application.Exceptions;
 using Application.Features.Attendance.DTOs;
 using Application.Features.Notifications.DTOs;
@@ -8,6 +9,9 @@ using Domain.Enums;
 using Infrastructure.Common;
 using Infrastructure.Contexts;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace Infrastructure.Academics
 {
@@ -16,12 +20,14 @@ namespace Infrastructure.Academics
         private readonly ApplicationDbContext _dbContext;
         private readonly INotificationService _notificationService;
         private readonly IDateTimeService _dateTime;
+        private readonly string _signingSecret;
 
-        public AttendanceService(ApplicationDbContext dbContext, INotificationService notificationService, IDateTimeService dateTime)
+        public AttendanceService(ApplicationDbContext dbContext, INotificationService notificationService, IDateTimeService dateTime, IOptions<JwtSettings> jwtSettings)
         {
             _dbContext = dbContext;
             _notificationService = notificationService;
             _dateTime = dateTime;
+            _signingSecret = jwtSettings.Value.Secret;
         }
 
         public async Task<List<StudentAttendanceDto>> GetOccurrenceAttendanceAsync(Guid occurrenceId, string tenantId, CancellationToken ct = default)
@@ -336,23 +342,6 @@ namespace Infrastructure.Academics
             return "Session ended. Absent students auto-marked and next occurrence scheduled.";
         }
 
-        public async Task<string> GenerateQrTokenAsync(Guid occurrenceId, string tenantId, CancellationToken ct = default)
-        {
-            var occurrence = await _dbContext.SessionOccurrences
-                .FirstOrDefaultAsync(o => o.Id == occurrenceId, ct);
-
-            if (occurrence == null)
-                throw new NotFoundException(["Session occurrence not found."]);
-
-            if (occurrence.Status != SessionStatus.Scheduled)
-                throw new ConflictException(["Cannot generate QR for a completed or cancelled session."]);
-
-            occurrence.QrToken = Guid.NewGuid().ToString("N");
-            await _dbContext.SaveChangesAsync(ct);
-
-            return occurrence.QrToken;
-        }
-
         public async Task<List<StudentAttendanceSummaryDto>> GetGroupAttendanceSummaryAsync(Guid groupId, string tenantId, CancellationToken ct = default)
         {
             var students = await (
@@ -577,74 +566,147 @@ namespace Infrastructure.Academics
             };
         }
 
-        public async Task<string> ScanQrCodeAsync(ScanQrRequest request, string studentId, CancellationToken ct = default)
+        // ══════════════════════════════════════════════════
+        // Attendance by code: student shows a signed code, the teacher / center
+        // scans it (one camera). Replaces the old teacher-shows-QR flow.
+        // ══════════════════════════════════════════════════
+        public async Task<CheckInCodeDto> GenerateCheckInTokenAsync(string studentId, Guid occurrenceId, CancellationToken ct = default)
         {
+            var occurrence = await _dbContext.SessionOccurrences
+                .FirstOrDefaultAsync(o => o.Id == occurrenceId, ct)
+                ?? throw new NotFoundException(["الحصة غير موجودة."]);
+
+            if (occurrence.Status != SessionStatus.Scheduled)
+                throw new ConflictException(["الحصة دي مش متاحة لتسجيل الحضور."]);
+            if (occurrence.OccurrenceDate != _dateTime.TodayInAppZone)
+                throw new ConflictException(["الحصة دي مش النهاردة."]);
+
+            var enrolled = await _dbContext.GroupStudents
+                .AnyAsync(gs => gs.GroupId == occurrence.GroupId && gs.StudentId == studentId, ct);
+            if (!enrolled)
+                throw new ForbiddenException(["انت مش مشترك في المجموعة دي."]);
+
+            const int ttlSeconds = 300;
+            long expiry = DateTimeOffset.UtcNow.AddSeconds(ttlSeconds).ToUnixTimeSeconds();
+            string payload = $"{studentId}|{occurrenceId:N}|{expiry}";
+            string token = $"{Convert.ToBase64String(Encoding.UTF8.GetBytes(payload))}.{Convert.ToBase64String(SignHmac(payload))}";
+
+            return new CheckInCodeDto { Token = token, ExpiresInSeconds = ttlSeconds };
+        }
+
+        public async Task<CenterScanResultDto> ScanCenterCodeAsync(string scannerTenantId, string token, CancellationToken ct = default)
+        {
+            // 1) Parse + verify the signature (stateless — no token storage).
+            var parts = (token ?? string.Empty).Split('.');
+            if (parts.Length != 2) throw new ConflictException(["كود غير صالح."]);
+
+            string payload;
+            byte[] providedSig;
+            try
+            {
+                payload = Encoding.UTF8.GetString(Convert.FromBase64String(parts[0]));
+                providedSig = Convert.FromBase64String(parts[1]);
+            }
+            catch { throw new ConflictException(["كود غير صالح."]); }
+
+            if (!CryptographicOperations.FixedTimeEquals(SignHmac(payload), providedSig))
+                throw new ConflictException(["كود غير صالح."]);
+
+            var fields = payload.Split('|');
+            if (fields.Length != 3 || !long.TryParse(fields[2], out var expiry))
+                throw new ConflictException(["كود غير صالح."]);
+            if (DateTimeOffset.UtcNow.ToUnixTimeSeconds() > expiry)
+                throw new ConflictException(["انتهت صلاحية الكود — اطلب من الطالب يحدّثه."]);
+
+            var studentId = fields[0];
+            if (!Guid.TryParseExact(fields[1], "N", out var occurrenceId))
+                throw new ConflictException(["كود غير صالح."]);
+
+            // 2) Validate the session + mark present (concurrency-safe).
             return await _dbContext.ExecuteWithConcurrencyRetryAsync(async () =>
             {
                 var occurrence = await _dbContext.SessionOccurrences
                     .Include(o => o.Session)
-                    .FirstOrDefaultAsync(o => o.Id == request.OccurrenceId, ct);
+                    .FirstOrDefaultAsync(o => o.Id == occurrenceId, ct)
+                    ?? throw new NotFoundException(["الحصة غير موجودة."]);
 
-                if (occurrence == null || occurrence.Status != SessionStatus.Scheduled)
-                    throw new ConflictException(["This session is not currently active."]);
-
-                if (string.IsNullOrEmpty(occurrence.QrToken) || occurrence.QrToken != request.QrToken)
-                    throw new ConflictException(["Invalid or expired QR code. Please scan the current code shown by your teacher."]);
-
-                // Validate date and time window in the app's business zone (Egypt).
-                var nowLocal   = _dateTime.NowInAppZone;
-                var todayLocal = _dateTime.TodayInAppZone;
-
-                if (occurrence.OccurrenceDate != todayLocal)
-                    throw new ConflictException(["This session is not scheduled for today."]);
+                if (occurrence.TenantId != scannerTenantId)
+                    throw new ForbiddenException(["الحصة دي مش تابعة لسنترك."]);
+                if (occurrence.Status != SessionStatus.Scheduled)
+                    throw new ConflictException(["الحصة دي مش متاحة لتسجيل الحضور."]);
+                if (occurrence.OccurrenceDate != _dateTime.TodayInAppZone)
+                    throw new ConflictException(["الحصة دي مش النهاردة."]);
 
                 var sessionStart = occurrence.StartTime ?? occurrence.Session!.StartTime;
-                var sessionEnd   = occurrence.EndTime   ?? occurrence.Session!.EndTime;
-
-                var allowedStart = sessionStart.Subtract(TimeSpan.FromMinutes(30));
-                var currentTime  = nowLocal.TimeOfDay;
-
-                if (currentTime < allowedStart)
-                    throw new ConflictException(["It is too early to scan the QR code for this session."]);
-
+                var sessionEnd = occurrence.EndTime ?? occurrence.Session!.EndTime;
+                var currentTime = _dateTime.NowInAppZone.TimeOfDay;
+                if (currentTime < sessionStart.Subtract(TimeSpan.FromMinutes(30)))
+                    throw new ConflictException(["لسه بدري على تسجيل حضور الحصة دي."]);
                 if (currentTime > sessionEnd)
-                    throw new ConflictException(["This session has already ended."]);
+                    throw new ConflictException(["الحصة دي انتهت بالفعل."]);
 
-                var isEnrolled = await _dbContext.GroupStudents
+                var enrolled = await _dbContext.GroupStudents
                     .AnyAsync(gs => gs.GroupId == occurrence.GroupId && gs.StudentId == studentId, ct);
+                if (!enrolled)
+                    throw new ForbiddenException(["الطالب ده مش مشترك في المجموعة دي."]);
 
-                if (!isEnrolled)
-                    throw new ForbiddenException(["You are not enrolled in this group."]);
+                // Group name/subject without the ownership filter, so any center operator
+                // (owner / staff) can scan into any teacher's session.
+                var group = await _dbContext.Groups
+                    .IgnoreQueryFilters()
+                    .Where(g => g.Id == occurrence.GroupId && g.TenantId == scannerTenantId)
+                    .Select(g => new { g.Name, g.Subject })
+                    .FirstOrDefaultAsync(ct);
+
+                var studentName = await _dbContext.Users
+                    .Where(u => u.Id == studentId)
+                    .Select(u => u.FirstName + " " + u.LastName)
+                    .FirstOrDefaultAsync(ct);
+
+                var result = new CenterScanResultDto
+                {
+                    StudentName = studentName ?? "الطالب",
+                    GroupName = group?.Name ?? "",
+                    Subject = group?.Subject,
+                };
 
                 var record = await _dbContext.AttendanceRecords
-                    .FirstOrDefaultAsync(a => a.OccurrenceId == request.OccurrenceId && a.StudentId == studentId, ct);
+                    .FirstOrDefaultAsync(a => a.OccurrenceId == occurrenceId && a.StudentId == studentId, ct);
 
                 if (record != null)
                 {
                     if (record.Status == AttendanceStatus.Present)
-                        return "You are already marked as present.";
-
-                    record.Status         = AttendanceStatus.Present;
+                    {
+                        result.AlreadyPresent = true;
+                        return result;
+                    }
+                    record.Status = AttendanceStatus.Present;
                     record.IsScannedViaQR = true;
-                    record.MarkedAt       = DateTime.UtcNow;
+                    record.MarkedAt = DateTime.UtcNow;
                 }
                 else
                 {
                     _dbContext.AttendanceRecords.Add(new AttendanceRecord
                     {
-                        OccurrenceId   = request.OccurrenceId,
-                        StudentId      = studentId,
-                        Status         = AttendanceStatus.Present,
-                        TenantId       = occurrence.TenantId,
+                        OccurrenceId = occurrenceId,
+                        StudentId = studentId,
+                        Status = AttendanceStatus.Present,
+                        TenantId = occurrence.TenantId,
                         IsScannedViaQR = true,
-                        MarkedAt       = DateTime.UtcNow
+                        MarkedAt = DateTime.UtcNow
                     });
                 }
 
                 await _dbContext.SaveChangesAsync(ct);
-
-                return "Attendance recorded successfully.";
+                return result;
             });
+        }
+
+        // HMAC-SHA256 over the payload using the app's signing secret.
+        private byte[] SignHmac(string payload)
+        {
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(_signingSecret));
+            return hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
         }
     }
 }

@@ -18,6 +18,11 @@ namespace Infrastructure.Identity.Services
 
         public string? TenantId => _httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimConstants.Tenant);
 
+        public string? WorkspaceRole => _httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimConstants.WorkspaceRole);
+
+        public bool IsWorkspaceMemberTeacher =>
+            string.Equals(WorkspaceRole, RoleConstants.Teacher, StringComparison.OrdinalIgnoreCase);
+
         public bool IsGlobalUser
         {
             get

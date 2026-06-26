@@ -11,7 +11,7 @@ using NSwag.Annotations;
 namespace WebAPI.Controllers.Teacher
 {
     [Route("api/teacher/payments")]
-    [Authorize(Roles = $"{RoleConstants.Teacher},{RoleConstants.Assistant}")]
+    [Authorize(Roles = $"{RoleConstants.CenterOwner},{RoleConstants.CenterStaff},{RoleConstants.Teacher},{RoleConstants.Assistant}")]
     [OpenApiTag("Teacher - Payments", Description = "Endpoints for recording and reviewing student payments")]
     public class TeacherPaymentsController : BaseApiController
     {

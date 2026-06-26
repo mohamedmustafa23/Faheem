@@ -11,15 +11,19 @@ namespace Infrastructure.Academics
     public class GroupService : IGroupService
     {
         private readonly ApplicationDbContext _dbContext;
+        private readonly ICurrentUserService _currentUserService;
 
-        public GroupService(ApplicationDbContext dbContext)
+        public GroupService(ApplicationDbContext dbContext, ICurrentUserService currentUserService)
         {
             _dbContext = dbContext;
+            _currentUserService = currentUserService;
         }
 
         public async Task<string> CreateGroupAsync(CreateGroupRequest request, string tenantId, CancellationToken ct = default)
         {
             string enrollmentCode = await GenerateUniqueCodeAsync(ct);
+
+            var ownerUserId = await ResolveGroupOwnerAsync(request.OwnerTeacherId, tenantId, ct);
 
             var group = new Group
             {
@@ -33,7 +37,8 @@ namespace Infrastructure.Academics
                 Description = request.Description,
                 EnrollmentCode = enrollmentCode,
                 Status = GroupStatus.Active,
-                TenantId = tenantId
+                TenantId = tenantId,
+                OwnerUserId = ownerUserId
             };
 
             await _dbContext.Groups.AddAsync(group, ct);
@@ -134,6 +139,12 @@ namespace Infrastructure.Academics
                         .Select(c => (int?)c.SessionsCompleted)
                         .FirstOrDefault(),
                     IsPinned = g.IsPinned,
+                    OwnerUserId = g.OwnerUserId,
+                    // Owning teacher's name — lets the center owner label/filter groups by teacher.
+                    OwnerName = _dbContext.Users
+                        .Where(u => u.Id == g.OwnerUserId)
+                        .Select(u => u.FirstName + " " + u.LastName)
+                        .FirstOrDefault(),
                 })
                 .ToListAsync(ct);
 
@@ -276,6 +287,33 @@ namespace Infrastructure.Academics
 
             await _dbContext.SaveChangesAsync(ct);
             return newCode;
+        }
+
+        // Decides which teacher a new group belongs to:
+        //  • a plain member teacher can only create their own groups (any override is ignored);
+        //  • an owner/assistant (sees the whole center) may pass OwnerTeacherId to create a
+        //    group on a teacher's behalf — it must be an active Teacher member of this center;
+        //  • otherwise the group belongs to the caller.
+        private async Task<string?> ResolveGroupOwnerAsync(string? ownerTeacherId, string tenantId, CancellationToken ct)
+        {
+            var callerId = _currentUserService.UserId;
+
+            if (_currentUserService.IsWorkspaceMemberTeacher || string.IsNullOrWhiteSpace(ownerTeacherId))
+                return callerId;
+
+            if (ownerTeacherId == callerId)
+                return callerId;
+
+            var isActiveTeacher = await _dbContext.WorkspaceMembers.AnyAsync(m =>
+                m.TenantId == tenantId &&
+                m.UserId == ownerTeacherId &&
+                m.Role == WorkspaceRole.Teacher &&
+                m.Status == WorkspaceMemberStatus.Active, ct);
+
+            if (!isActiveTeacher)
+                throw new NotFoundException(["The selected teacher is not an active member of this center."]);
+
+            return ownerTeacherId;
         }
 
         private async Task<string> GenerateUniqueCodeAsync(CancellationToken ct)

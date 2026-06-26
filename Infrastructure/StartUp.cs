@@ -44,7 +44,6 @@ namespace Infrastructure
             return services
                 .AddDbContext<TenantDbContext>(options => options.UseSqlServer(config.GetConnectionString("DefaultConnection")))
                 .AddMultiTenant<AppTenantInfo>()
-                .WithHeaderStrategy(TenancyConstants.TenantIdName)
                 .WithClaimStrategy(ClaimConstants.Tenant)
                 .WithEFCoreStore<TenantDbContext, AppTenantInfo>()
                 .Services
@@ -54,6 +53,7 @@ namespace Infrastructure
                 .AddTransient<ApplicationDbSeeder>()
                 .AddTransient<IEmailService, EmailService>()
                 .AddScoped<ITenantService, TenantService>()
+                .AddScoped<ICenterService, CenterService>()
                 .AddScoped<IAuthService, AuthService>()
                 .AddScoped<ILinkService, LinkService>()
                 .AddScoped<IGroupService, GroupService>()
@@ -63,6 +63,7 @@ namespace Infrastructure
                 .AddScoped<IStudentService, StudentService>()
                 .AddScoped<IAttendanceService, AttendanceService>()
                 .AddScoped<IGradeService, GradeService>()
+                .AddScoped<IParentInsightsService, ParentInsightsService>()
                 .AddScoped<INotificationService, NotificationService>()
                 .AddScoped<IMaterialService, MaterialService>()
                 .AddScoped<IAnnouncementService, AnnouncementService>()

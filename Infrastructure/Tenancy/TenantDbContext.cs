@@ -34,6 +34,11 @@ namespace Infrastructure.Tenancy
             modelBuilder.Entity<AppTenantInfo>()
                 .Property(t => t.IsActive)
                 .IsRequired();
+            modelBuilder.Entity<AppTenantInfo>()
+                .Property(t => t.Type)
+                .HasConversion<string>()
+                .HasMaxLength(20)
+                .IsRequired();
         }
     }
 }

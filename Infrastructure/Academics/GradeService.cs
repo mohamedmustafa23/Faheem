@@ -45,6 +45,21 @@ namespace Infrastructure.Academics
             return exam.Id;
         }
 
+        public async Task<string> DeleteExamAsync(Guid examId, string tenantId, CancellationToken ct = default)
+        {
+            // Tenant-scoped by the global query filter, so a teacher can only delete
+            // their own exams. Remove the recorded scores first, then the exam itself.
+            var exam = await _dbContext.Exams.FirstOrDefaultAsync(e => e.Id == examId, ct);
+            if (exam == null) throw new NotFoundException(["Exam not found."]);
+
+            var grades = await _dbContext.StudentGrades.Where(g => g.ExamId == examId).ToListAsync(ct);
+            if (grades.Count > 0) _dbContext.StudentGrades.RemoveRange(grades);
+            _dbContext.Exams.Remove(exam);
+            await _dbContext.SaveChangesAsync(ct);
+
+            return "تم حذف الامتحان.";
+        }
+
         public async Task<string> SaveGradesAsync(SaveGradesRequest request, string tenantId, CancellationToken ct = default)
         {
             var exam = await _dbContext.Exams

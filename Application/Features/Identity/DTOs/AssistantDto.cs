@@ -8,5 +8,8 @@ namespace Application.Features.Identity.DTOs
         public string Email { get; set; } = string.Empty;
         public string PhoneNumber { get; set; } = string.Empty;
         public bool IsActive { get; set; }
+
+        /// <summary>The assistant's capability flags (CenterPermissions bitmask).</summary>
+        public int Permissions { get; set; }
     }
 }
