@@ -63,7 +63,7 @@ namespace Infrastructure.Academics
                 .Select(a => new { a.StudentId, a.Occurrence!.GroupId, a.Status })
                 .ToListAsync(ct);
 
-            // The child's own fees, per group.
+            // The child's own fees + payment history, per group.
             var payRecords = await _db.StudentPaymentRecords
                 .Where(r => r.StudentId == childId && groupIds.Contains(r.GroupId))
                 .Select(r => new
@@ -72,7 +72,9 @@ namespace Infrastructure.Academics
                     r.Status,
                     r.ExpectedAmount,
                     r.DiscountAmount,
-                    Paid = r.Transactions.Sum(t => (decimal?)t.Amount) ?? 0m,
+                    CycleNumber = r.PaymentCycle != null ? (int?)r.PaymentCycle.CycleNumber : null,
+                    IsStandalone = r.OccurrenceId != null,
+                    Transactions = r.Transactions.Select(t => new { t.PaidAt, t.Amount }).ToList(),
                 })
                 .ToListAsync(ct);
 
@@ -129,7 +131,16 @@ namespace Infrastructure.Academics
 
                 var pr = payRecords.Where(x => x.GroupId == g.GroupId).ToList();
                 decimal expected = pr.Sum(x => x.Status == PaymentStatus.Waived ? 0m : x.ExpectedAmount - x.DiscountAmount);
-                decimal paid = pr.Sum(x => x.Paid);
+                decimal paid = pr.Sum(x => x.Transactions.Sum(t => t.Amount));
+                var payments = pr
+                    .SelectMany(x => x.Transactions.Select(t => new ChildPaymentEntryDto
+                    {
+                        PaidAt = t.PaidAt,
+                        Amount = t.Amount,
+                        CycleLabel = x.IsStandalone ? "حصة منفصلة" : x.CycleNumber != null ? $"دورة {x.CycleNumber}" : "دفعة",
+                    }))
+                    .OrderByDescending(p => p.PaidAt)
+                    .ToList();
 
                 result.Add(new ChildGroupOverviewDto
                 {
@@ -151,6 +162,7 @@ namespace Infrastructure.Academics
                     TotalExpected = expected,
                     TotalPaid = paid,
                     TotalRemaining = Math.Max(0m, expected - paid),
+                    Payments = payments,
                 });
             }
 

@@ -31,5 +31,16 @@ namespace Application.Features.Parents.DTOs
         public decimal TotalExpected { get; set; }
         public decimal TotalPaid { get; set; }
         public decimal TotalRemaining { get; set; }
+
+        // Payment history (this child, this group), newest first — so the parent
+        // sees each instalment: how much, when, and against which cycle.
+        public List<ChildPaymentEntryDto> Payments { get; set; } = new();
+    }
+
+    public class ChildPaymentEntryDto
+    {
+        public DateTime PaidAt { get; set; }
+        public decimal Amount { get; set; }
+        public string CycleLabel { get; set; } = string.Empty;
     }
 }
