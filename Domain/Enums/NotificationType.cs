@@ -11,6 +11,8 @@ namespace Domain.Enums
         /// <summary>A new student joined a teacher's group (notification goes to the teacher).</summary>
         StudentJoined = 7,
         /// <summary>Teacher applied a discount on a student's payment record (goes to the student).</summary>
-        DiscountApplied = 8
+        DiscountApplied = 8,
+        /// <summary>A subscription is about to expire (goes to the workspace owner). Used to dedup daily reminders.</summary>
+        SubscriptionExpiring = 9
     }
 }

@@ -234,7 +234,13 @@ namespace Infrastructure.Identity.Services
 
             await _userManager.AddToRoleAsync(teacherUser, RoleConstants.Teacher);
 
-            string tenantIdentifier = $"tenant_{request.PhoneNumber}";
+            // Opaque, PII-free workspace identifier. Generic "workspace_" prefix
+            // (type-agnostic on purpose): the workspace TYPE lives in TenantInfo.Type,
+            // so the id never needs a new prefix as more types appear (center, school…).
+            // NOT derived from the phone: it never changes if the teacher updates their
+            // number, leaks no personal data inside the decodable JWT, and can't be
+            // guessed. Well under the 64-char TenantId cap.
+            string tenantIdentifier = $"workspace_{Guid.NewGuid():N}";
             var createTenantRequest = new CreateTenantRequest
             {
                 Identifier = tenantIdentifier,
@@ -319,7 +325,9 @@ namespace Infrastructure.Identity.Services
             // active trial (no seat limit) so it's usable straight away — mirrors the
             // teacher's one-month grant. This stands in until the self-service subscription
             // page exists; then registration will create it inactive and payment activates it.
-            var tenantId = $"center_{Guid.NewGuid():N}";
+            // Uniform opaque workspace id (same scheme as the individual teacher above);
+            // the Center type is recorded on TenantInfo.Type, not in the id prefix.
+            var tenantId = $"workspace_{Guid.NewGuid():N}";
             var tenant = new AppTenantInfo
             {
                 Id = tenantId,
@@ -406,14 +414,14 @@ namespace Infrastructure.Identity.Services
             await _dbContext.EmailVerifications.AddAsync(emailVerification, ct);
             await _dbContext.SaveChangesAsync(ct);
 
-            string subject = "Faheem - Verify Your Email";
-            string htmlBody = GetPremiumEmailTemplate(
-                title: "Email Verification",
-                message: "Welcome to Faheem! Please use the verification code below to confirm your email address and activate your account.",
-                otp: plainOtp,
-                validity: "30 minutes");
+            string subject = "جوكو — تأكيد بريدك الإلكتروني";
+            string title = "تأكيد البريد الإلكتروني";
+            string message = "أهلاً بيك في جوكو! استخدم الكود ده لتأكيد بريدك وتفعيل حسابك.";
+            string validity = "٣٠ دقيقة";
+            string htmlBody = GetPremiumEmailTemplate(title, message, plainOtp, validity);
+            string textBody = GetPlainTextEmail(title, message, plainOtp, validity);
 
-            await _emailService.SendEmailAsync(email, subject, htmlBody, ct);
+            await _emailService.SendEmailAsync(email, subject, htmlBody, textBody, ct);
         }
 
         // ══════════════════════════════════════════════════
@@ -509,14 +517,14 @@ namespace Infrastructure.Identity.Services
             await _dbContext.EmailVerifications.AddAsync(emailVerification, ct);
             await _dbContext.SaveChangesAsync(ct);
 
-            string subject = "Faheem - Password Reset Request";
-            string htmlBody = GetPremiumEmailTemplate(
-                title: "Reset Your Password",
-                message: "We received a request to reset your password. Enter the code below to choose a new password.",
-                otp: plainOtp,
-                validity: "60 minutes");
+            string subject = "جوكو — إعادة تعيين كلمة المرور";
+            string title = "إعادة تعيين كلمة المرور";
+            string message = "استلمنا طلب لإعادة تعيين كلمة مرورك. استخدم الكود ده لاختيار كلمة مرور جديدة.";
+            string validity = "٦٠ دقيقة";
+            string htmlBody = GetPremiumEmailTemplate(title, message, plainOtp, validity);
+            string textBody = GetPlainTextEmail(title, message, plainOtp, validity);
 
-            await _emailService.SendEmailAsync(email, subject, htmlBody, ct);
+            await _emailService.SendEmailAsync(email, subject, htmlBody, textBody, ct);
         }
 
         // ══════════════════════════════════════════════════
@@ -836,24 +844,46 @@ namespace Infrastructure.Identity.Services
 
             var roles = await _userManager.GetRolesAsync(user);
 
-            // Teacher self-delete is gated by ownership — a single careless tap
-            // shouldn't strand groups and students with no owner. They must wind
-            // down their account through a teacher's manual path instead.
-            // Tenant id is stored as a user claim (Finbuckle MultiTenant), not
-            // a column on ApplicationUser, so we pull it from there.
-            if (roles.Contains(RoleConstants.Teacher))
+            // The workspace (tenant) this user owns, if any — needed both to gate the
+            // delete and to clean it up afterwards so it doesn't linger as a ghost
+            // subscriber. Tenant id is a Finbuckle user claim, not a column. A user
+            // OWNS the workspace iff its email matches theirs (center members don't).
+            var userClaims = await _userManager.GetClaimsAsync(user);
+            var userTenantId = userClaims.FirstOrDefault(c => c.Type == ClaimConstants.Tenant)?.Value;
+            AppTenantInfo? ownedTenant = null;
+            if (!string.IsNullOrEmpty(userTenantId))
             {
-                var userClaims = await _userManager.GetClaimsAsync(user);
-                var teacherTenantId = userClaims.FirstOrDefault(c => c.Type == ClaimConstants.Tenant)?.Value;
-                if (!string.IsNullOrEmpty(teacherTenantId))
-                {
-                    var ownsActiveGroups = await _dbContext.Groups
-                        .AnyAsync(g => g.TenantId == teacherTenantId, ct);
-                    if (ownsActiveGroups)
-                        throw new ConflictException([
-                            "Cannot delete: your workspace still has active groups. Delete them first."
-                        ]);
-                }
+                var tenant = await _tenantStore.TryGetAsync(userTenantId);
+                if (tenant != null && string.Equals(tenant.Email, user.Email, StringComparison.OrdinalIgnoreCase))
+                    ownedTenant = tenant;
+            }
+
+            // An individual teacher can't delete while their workspace still has groups —
+            // a single careless tap shouldn't strand groups and students with no owner.
+            if (roles.Contains(RoleConstants.Teacher) && !string.IsNullOrEmpty(userTenantId))
+            {
+                var ownsActiveGroups = await _dbContext.Groups
+                    .AnyAsync(g => g.TenantId == userTenantId, ct);
+                if (ownsActiveGroups)
+                    throw new ConflictException([
+                        "Cannot delete: your workspace still has active groups. Delete them first."
+                    ]);
+            }
+
+            // A center owner can't delete while the center still has teachers or groups —
+            // that would orphan the whole center. They must wind it down first.
+            if (roles.Contains(RoleConstants.CenterOwner) && ownedTenant != null)
+            {
+                var hasGroups = await _dbContext.Groups.IgnoreQueryFilters()
+                    .AnyAsync(g => g.TenantId == ownedTenant.Id, ct);
+                var hasTeachers = await _dbContext.WorkspaceMembers.IgnoreQueryFilters()
+                    .AnyAsync(m => m.TenantId == ownedTenant.Id
+                                && m.Role == Domain.Enums.WorkspaceRole.Teacher
+                                && m.Status == Domain.Enums.WorkspaceMemberStatus.Active, ct);
+                if (hasGroups || hasTeachers)
+                    throw new ConflictException([
+                        "مينفعش تمسح السنتر وهو لسه فيه مدرّسين أو مجموعات — شيلهم الأول."
+                    ]);
             }
 
             // Remove everything that points at this user before the Identity delete.
@@ -895,6 +925,12 @@ namespace Infrastructure.Identity.Services
 
             await tx.CommitAsync(ct);
 
+            // Clean up the (now-empty) owned workspace so it doesn't linger as a ghost
+            // subscriber in the admin list, and so re-registering with the same email
+            // starts fresh instead of creating a duplicate tenant.
+            if (ownedTenant != null)
+                await _tenantStore.TryRemoveAsync(ownedTenant.Id);
+
             return "Account deleted.";
         }
 
@@ -912,16 +948,34 @@ namespace Infrastructure.Identity.Services
         // ══════════════════════════════════════════════════
         // Email HTML Template Builder
         // ══════════════════════════════════════════════════
+        // Plain-text twin of the HTML email — used as the multipart/alternative
+        // text part so notification previews read cleanly (no jammed HTML).
+        private string GetPlainTextEmail(string title, string message, string otp, string validity)
+        {
+            return
+$@"جوكو — رفيقك الدراسي
+
+{title}
+
+{message}
+
+الكود: {otp}
+(صالح لمدة {validity})
+
+لو مش إنت اللي طلبت الإيميل ده، تجاهله بأمان.
+© {DateTime.Now.Year} جوكو — jokolearn.com";
+        }
+
         private string GetPremiumEmailTemplate(string title, string message, string otp, string validity)
         {
             return $@"
             <!DOCTYPE html>
-            <html lang='en'>
+            <html lang='ar' dir='rtl'>
             <head>
                 <meta charset='UTF-8'>
                 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
             </head>
-            <body style='margin: 0; padding: 0; font-family: ""Segoe UI"", Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6;'>
+            <body style='margin: 0; padding: 0; font-family: ""Segoe UI"", Tahoma, Arial, sans-serif; background-color: #f4f7f6;'>
                 <table width='100%' cellpadding='0' cellspacing='0' border='0' style='background-color: #f4f7f6; padding: 40px 20px;'>
                     <tr>
                         <td align='center'>
@@ -929,32 +983,32 @@ namespace Infrastructure.Identity.Services
                                 <!-- Header -->
                                 <tr>
                                     <td align='center' style='padding: 40px 0 20px 0;'>
-                                        <h1 style='margin: 0; color: #0f172a; font-size: 32px; font-weight: 800; letter-spacing: 2px;'>FAHEEM</h1>
-                                        <p style='margin: 5px 0 0 0; color: #64748b; font-size: 14px; letter-spacing: 1px;'>PREMIUM EDUCATION PLATFORM</p>
+                                        <h1 style='margin: 0; color: #16A34A; font-size: 32px; font-weight: 800;'>جوكو</h1>
+                                        <p style='margin: 6px 0 0 0; color: #64748b; font-size: 14px;'>رفيقك الدراسي — jokolearn.com</p>
                                     </td>
                                 </tr>
                                 <!-- Content -->
                                 <tr>
                                     <td style='padding: 20px 40px; text-align: center;'>
-                                        <h2 style='margin: 0 0 15px 0; color: #334155; font-size: 20px; font-weight: 600;'>{title}</h2>
-                                        <p style='margin: 0 0 25px 0; color: #475569; font-size: 16px; line-height: 1.6;'>
+                                        <h2 style='margin: 0 0 15px 0; color: #334155; font-size: 20px; font-weight: 700;'>{title}</h2>
+                                        <p style='margin: 0 0 25px 0; color: #475569; font-size: 16px; line-height: 1.9;'>
                                             {message}
                                         </p>
                                         <!-- OTP Box -->
-                                        <div style='background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 0 auto; max-width: 300px;'>
-                                            <span style='font-family: monospace; font-size: 36px; font-weight: 700; color: #2563eb; letter-spacing: 8px;'>{otp}</span>
+                                        <div style='background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 20px; margin: 0 auto; max-width: 300px;'>
+                                            <span style='font-family: monospace; font-size: 36px; font-weight: 700; color: #16A34A; letter-spacing: 8px;'>{otp}</span>
                                         </div>
                                         <p style='margin: 25px 0 0 0; color: #64748b; font-size: 14px;'>
-                                            This code is valid for <strong>{validity}</strong>.
+                                            الكود ده صالح لمدة <strong>{validity}</strong>.
                                         </p>
                                     </td>
                                 </tr>
                                 <!-- Footer -->
                                 <tr>
                                     <td style='padding: 30px 40px; background-color: #f8fafc; text-align: center; border-top: 1px solid #f1f5f9;'>
-                                        <p style='margin: 0; color: #94a3b8; font-size: 12px; line-height: 1.5;'>
-                                            If you didn't request this email, you can safely ignore it.<br>
-                                            &copy; {DateTime.Now.Year} Faheem Platform. All rights reserved.
+                                        <p style='margin: 0; color: #94a3b8; font-size: 12px; line-height: 1.7;'>
+                                            لو مش إنت اللي طلبت الإيميل ده، تجاهله بأمان.<br>
+                                            &copy; {DateTime.Now.Year} جوكو — jokolearn.com
                                         </p>
                                     </td>
                                 </tr>

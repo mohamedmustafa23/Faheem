@@ -1,3 +1,4 @@
+using Application.Features.LessonReports.Queries;
 using Application.Features.Parents.Queries;
 using Infrastructure.Constants;
 using Infrastructure.Identity;
@@ -38,6 +39,14 @@ namespace WebAPI.Controllers.Parent
         public async Task<IActionResult> GetChildGroupsOverviewAsync(string childId)
         {
             var query = new GetChildGroupsOverviewQuery { ParentId = User.GetUserId()!, ChildId = childId };
+            return Ok(await Sender.Send(query));
+        }
+
+        [HttpGet("children/{childId}/groups/{groupId}/reports")]
+        [OpenApiOperation("Get Child Lesson Reports", "The child's per-session lesson reports in one group (summary + homework + this child's feedback), newest first.")]
+        public async Task<IActionResult> GetChildGroupReportsAsync(string childId, Guid groupId)
+        {
+            var query = new GetChildGroupReportsQuery { ParentId = User.GetUserId()!, ChildId = childId, GroupId = groupId };
             return Ok(await Sender.Send(query));
         }
 

@@ -18,5 +18,11 @@ namespace Application.Features.Payments.DTOs
 
         /// <summary>Total expected per student = BaseFee + ExtraFee.</summary>
         public decimal TotalFeePerStudent => BaseFee + ExtraFee;
+
+        /// <summary>
+        /// Students in this cycle who still owe money (non-waived, remaining &gt; 0).
+        /// Surfaced on the cycle card so unpaid balances stay visible even after close.
+        /// </summary>
+        public int UnpaidCount { get; set; }
     }
 }

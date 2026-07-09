@@ -248,45 +248,9 @@ namespace Infrastructure.Academics
 
                     if (!targetCycle.IsCompleted && targetCycle.SessionsCompleted >= targetCycle.SessionsTarget)
                     {
-                        targetCycle.IsCompleted = true;
-                        targetCycle.ClosedAt    = DateTime.UtcNow;
-
-                        var group = await _dbContext.Groups.FindAsync([occurrence.GroupId], ct);
-                        int nextTarget      = group?.SessionsPerCycle ?? targetCycle.SessionsTarget;
-                        decimal nextBaseFee = group?.MonthlyFee ?? 0;
-
-                        int nextNumber = (await _dbContext.PaymentCycles
-                            .Where(c => c.GroupId == occurrence.GroupId)
-                            .MaxAsync(c => (int?)c.CycleNumber, ct) ?? 0) + 1;
-
-                        var newCycle = new PaymentCycle
-                        {
-                            GroupId        = occurrence.GroupId,
-                            CycleNumber    = nextNumber,
-                            SessionsTarget = nextTarget,
-                            BaseFee        = nextBaseFee,
-                            TenantId       = tenantId
-                        };
-                        _dbContext.PaymentCycles.Add(newCycle);
-
-                        var currentStudentIds = await _dbContext.GroupStudents
-                            .Where(gs => gs.GroupId == occurrence.GroupId)
-                            .Select(gs => gs.StudentId)
-                            .ToListAsync(ct);
-
-                        foreach (var sid in currentStudentIds)
-                        {
-                            _dbContext.StudentPaymentRecords.Add(new StudentPaymentRecord
-                            {
-                                StudentId         = sid,
-                                GroupId           = occurrence.GroupId,
-                                PaymentCycle      = newCycle,
-                                EnrolledAtSession = 0,
-                                ExpectedAmount    = nextBaseFee,
-                                Status            = PaymentStatus.Unpaid,
-                                TenantId          = tenantId
-                            });
-                        }
+                        // Target reached → close this cycle, open the next, and carry
+                        // every student's unpaid balance forward (shared with manual close).
+                        await CycleTransition.CloseAndOpenNextAsync(_dbContext, targetCycle, tenantId, ct);
 
                         await _dbContext.SaveChangesAsync(ct);
                         return (occurrence.GroupId, absentIds, enrolledStudentIds, CycleCompletedSessions: (int?)cycleCompletedCount);
@@ -329,7 +293,7 @@ namespace Infrastructure.Academics
                         title: "موعد سداد جديد",
                         message: $"تم إتمام {cycleCount} حصة في مجموعة ({groupName2})، حان موعد سداد دورة الدفع الجديدة.",
                         type: NotificationType.PaymentDue,
-                        route: "/student/finance"),
+                        route: "/student/payments"),
                     parentPayloadFactory: (sid, name) => new NotificationPayload(
                         title: "موعد سداد ابنك",
                         message: $"أتم {name} {cycleCount} حصة في مجموعة ({groupName2})، حان موعد سداد دورة الدفع الجديدة.",

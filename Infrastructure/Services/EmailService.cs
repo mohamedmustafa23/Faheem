@@ -18,16 +18,23 @@ namespace Infrastructure.Services
             _logger = logger;
         }
 
-        public async Task SendEmailAsync(string to, string subject, string body, CancellationToken ct = default)
+        public async Task SendEmailAsync(string to, string subject, string htmlBody, string? textBody = null, CancellationToken ct = default)
         {
             try
             {
                 var email = new MimeMessage();
-                email.Sender = MailboxAddress.Parse(_mailSettings.EmailFrom);
+                // Explicit display name so recipients see "جوكو" as the sender,
+                // not the raw address. From + Sender both set for deliverability.
+                var from = new MailboxAddress(_mailSettings.DisplayName, _mailSettings.EmailFrom);
+                email.From.Add(from);
+                email.Sender = from;
                 email.To.Add(MailboxAddress.Parse(to));
                 email.Subject = subject;
 
-                var builder = new BodyBuilder { HtmlBody = body };
+                var builder = new BodyBuilder { HtmlBody = htmlBody };
+                // Plain-text alternative: clean notification previews + better
+                // deliverability (spam filters penalise HTML-only mail).
+                if (!string.IsNullOrWhiteSpace(textBody)) builder.TextBody = textBody;
                 email.Body = builder.ToMessageBody();
 
                 using var smtp = new SmtpClient();

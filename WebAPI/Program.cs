@@ -62,15 +62,16 @@ namespace WebAPI
             app.UseMiddleware<ErrorHandlingMiddleware>();
             app.UseInfrastructure(app.Environment);
 
-            // Serve runtime-uploaded files (materials, etc.) from ContentRoot/wwwroot.
-            // Pointing the provider explicitly avoids a 404 on every upload when the
-            // published API shipped without a wwwroot folder (WebRootPath would be null).
+            // Serve the marketing site (index.html / privacy.html) + runtime-uploaded
+            // files (materials, etc.) from ContentRoot/wwwroot. Pointing the provider
+            // explicitly avoids a 404 on every upload when the published API shipped
+            // without a wwwroot folder (WebRootPath would be null).
             var webRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
             Directory.CreateDirectory(webRoot);
-            app.UseStaticFiles(new StaticFileOptions
-            {
-                FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(webRoot),
-            });
+            var webRootProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(webRoot);
+            // "/" → index.html (the jokolearn.com landing page).
+            app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = webRootProvider });
+            app.UseStaticFiles(new StaticFileOptions { FileProvider = webRootProvider });
             app.MapControllers();
             app.MapHealthChecks("/health");
 

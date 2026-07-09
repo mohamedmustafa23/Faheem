@@ -17,6 +17,16 @@ namespace Infrastructure.Identity.Models
 
         public bool IsRevoked { get; set; }
 
+        /// <summary>
+        /// The workspace (Finbuckle tenant identifier) this session was issued for.
+        /// A user can belong to several workspaces, so the SELECTED one is a property
+        /// of the session — not of the user — and lives here on the refresh token.
+        /// Read on refresh to re-issue a JWT scoped to the same workspace, instead of
+        /// re-parsing the fragile "tenant" claim off the expired access token.
+        /// Null for tokens issued before this column existed (handled via fallback).
+        /// </summary>
+        public string? WorkspaceIdentifier { get; set; }
+
         [ForeignKey(nameof(UserId))]
         public virtual ApplicationUser User { get; set; } = null!;
     }

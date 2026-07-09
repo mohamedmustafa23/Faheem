@@ -37,6 +37,10 @@ namespace Infrastructure.Contexts
         public DbSet<Exam> Exams => Set<Exam>();
         public DbSet<StudentGrade> StudentGrades => Set<StudentGrade>();
 
+        // Lesson reports
+        public DbSet<LessonReport> LessonReports => Set<LessonReport>();
+        public DbSet<LessonReportEntry> LessonReportEntries => Set<LessonReportEntry>();
+
         // Notifications & Content
         public DbSet<Notification> Notifications => Set<Notification>();
         public DbSet<UserDevice> UserDevices => Set<UserDevice>();

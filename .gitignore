@@ -377,3 +377,7 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+# k6 load-test scripts — local tooling; creds come from env vars, never commit
+load-test.js
+stress-test.js
+capacity-test.js

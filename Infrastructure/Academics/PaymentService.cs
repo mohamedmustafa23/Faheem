@@ -59,7 +59,10 @@ namespace Infrastructure.Academics
                     OpenedAt          = c.OpenedAt,
                     ClosedAt          = c.ClosedAt,
                     BaseFee           = c.BaseFee,
-                    ExtraFee          = c.ExtraFee
+                    ExtraFee          = c.ExtraFee,
+                    UnpaidCount       = c.StudentRecords.Count(r =>
+                        r.Status != PaymentStatus.Waived &&
+                        (r.ExpectedAmount - r.DiscountAmount) > (r.Transactions.Sum(t => (decimal?)t.Amount) ?? 0m))
                 })
                 .ToListAsync(ct);
 
@@ -431,28 +434,34 @@ namespace Infrastructure.Academics
                     });
                 }
 
-                // ── Group totals (waived contributes 0) ───────────────────────
+                // ── Group totals: aggregate EVERY record for this group across ALL
+                //    cycles (open + closed) + standalone. This makes unpaid balances
+                //    from a closed cycle visible to the student (they used to vanish),
+                //    and always reflects later edits. Waived contributes 0.
                 decimal groupExpected = 0;
                 decimal groupPaid     = 0;
                 decimal groupRemaining = 0;
+                decimal previousCyclesRemaining = 0;
 
-                if (groupDto.CurrentCycle != null && groupDto.CurrentCycle.Status != PaymentStatus.Waived)
+                foreach (var r in records.Where(r => r.GroupId == enr.GroupId))
                 {
-                    groupExpected  += groupDto.CurrentCycle.NetExpected;
-                    groupPaid      += groupDto.CurrentCycle.TotalPaid;
-                    groupRemaining += groupDto.CurrentCycle.Remaining;
-                }
-                foreach (var s in groupDto.Standalone)
-                {
-                    if (s.Status == PaymentStatus.Waived) continue;
-                    groupExpected  += s.NetExpected;
-                    groupPaid      += s.TotalPaid;
-                    groupRemaining += s.Remaining;
+                    decimal paid = r.Transactions.Sum(t => t.Amount);
+                    decimal net  = r.Status == PaymentStatus.Waived ? 0m : r.ExpectedAmount - r.DiscountAmount;
+                    decimal rem  = Math.Max(0m, net - paid);
+
+                    groupExpected  += net;
+                    groupPaid      += paid;
+                    groupRemaining += rem;
+
+                    // Remaining that lives in a CLOSED cycle = debt from a previous period.
+                    bool isClosedCycle = r.PaymentCycleId.HasValue && !openCycles.ContainsKey(r.PaymentCycleId.Value);
+                    if (isClosedCycle) previousCyclesRemaining += rem;
                 }
 
-                groupDto.TotalExpected  = groupExpected;
-                groupDto.TotalPaid      = groupPaid;
-                groupDto.TotalRemaining = groupRemaining;
+                groupDto.TotalExpected           = groupExpected;
+                groupDto.TotalPaid               = groupPaid;
+                groupDto.TotalRemaining          = groupRemaining;
+                groupDto.PreviousCyclesRemaining = previousCyclesRemaining;
 
                 overview.Groups.Add(groupDto);
             }
@@ -545,7 +554,7 @@ namespace Infrastructure.Academics
                             title: title,
                             message: studentBody,
                             type: NotificationType.PaymentConfirmed,
-                            route: "/student/finance"),
+                            route: "/student/payments"),
                         parentPayloadFactory: (sid, name) => new NotificationPayload(
                             title: fullyPaid ? "سداد ابنك بالكامل" : "دفعة جزئية لابنك",
                             message: fullyPaid
@@ -609,55 +618,13 @@ namespace Infrastructure.Academics
                 if (cycle.IsCompleted)
                     throw new ConflictException(["This cycle is already closed."]);
 
-                // Determine next cycle number using the highest existing — defends against races
-                // where two close-cycle attempts run concurrently.
-                int nextCycleNumber = (await _dbContext.PaymentCycles
-                    .Where(c => c.GroupId == cycle.GroupId)
-                    .MaxAsync(c => (int?)c.CycleNumber, ct) ?? 0) + 1;
-
-                cycle.IsCompleted = true;
-                cycle.ClosedAt    = DateTime.UtcNow;
-
-                var group = await _dbContext.Groups
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(g => g.Id == cycle.GroupId, ct);
-
-                int nextTarget  = group?.SessionsPerCycle ?? cycle.SessionsTarget;
-                decimal nextFee = group?.MonthlyFee ?? 0;
-
-                var newCycle = new PaymentCycle
-                {
-                    GroupId        = cycle.GroupId,
-                    CycleNumber    = nextCycleNumber,
-                    SessionsTarget = nextTarget,
-                    BaseFee        = nextFee,
-                    TenantId       = tenantId
-                };
-                _dbContext.PaymentCycles.Add(newCycle);
-
-                var enrolledStudentIds = await _dbContext.GroupStudents
-                    .Where(gs => gs.GroupId == cycle.GroupId)
-                    .Select(gs => gs.StudentId)
-                    .ToListAsync(ct);
-
-                foreach (var sid in enrolledStudentIds)
-                {
-                    _dbContext.StudentPaymentRecords.Add(new StudentPaymentRecord
-                    {
-                        StudentId         = sid,
-                        GroupId           = cycle.GroupId,
-                        PaymentCycle      = newCycle,
-                        EnrolledAtSession = 0,
-                        ExpectedAmount    = nextFee,
-                        Status            = PaymentStatus.Unpaid,
-                        TenantId          = tenantId
-                    });
-                }
+                // Close + open next + carry every student's unpaid balance forward.
+                var newCycle = await CycleTransition.CloseAndOpenNextAsync(_dbContext, cycle, tenantId, ct);
 
                 await _dbContext.SaveChangesAsync(ct);
                 await tx.CommitAsync(ct);
 
-                return $"Cycle {cycle.CycleNumber} closed. New cycle {newCycle.CycleNumber} opened for {enrolledStudentIds.Count} student(s).";
+                return $"Cycle {cycle.CycleNumber} closed. New cycle {newCycle.CycleNumber} opened.";
             });
         }
 
@@ -763,7 +730,7 @@ namespace Infrastructure.Academics
                     title: "خصم جديد",
                     message: $"تم تطبيق خصم {amount:0.##} ج على دفعتك في ({groupNameDiscount}). المستحق عليك الآن: {newNet:0.##} ج.",
                     type: NotificationType.DiscountApplied,
-                    route: "/student/finance"),
+                    route: "/student/payments"),
                 parentPayloadFactory: (sid, name) => new NotificationPayload(
                     title: "خصم لابنك",
                     message: $"تم تطبيق خصم {amount:0.##} ج على دفعة {name} في ({groupNameDiscount}). المتبقي: {newNet:0.##} ج.",
@@ -872,7 +839,7 @@ namespace Infrastructure.Academics
                             title: "تحديث الرسوم",
                             message: $"تم تحديث رسوم الدورة الحالية لمجموعة ({groupNameRecal}). المتبقي عليك الآن: {remaining:0.##} ج.",
                             type: NotificationType.PaymentDue,
-                            route: "/student/finance"),
+                            route: "/student/payments"),
                         parentPayloadFactory: (sid, name) => new NotificationPayload(
                             title: "تحديث رسوم ابنك",
                             message: $"تم تحديث رسوم الدورة الحالية لـ {name} في مجموعة ({groupNameRecal}). المتبقي: {remaining:0.##} ج.",
@@ -956,12 +923,12 @@ namespace Infrastructure.Academics
                     StudentName      = user != null ? $"{user.FirstName} {user.LastName}" : "Unknown",
                     PhoneNumber      = user?.PhoneNumber ?? string.Empty,
                     EnrolledAtSession = r.EnrolledAtSession,
-                    ExpectedAmount   = r.ExpectedAmount,
-                    DiscountAmount   = r.DiscountAmount,
-                    DiscountReason   = r.DiscountReason,
-                    TotalPaid        = totalPaid,
-                    Status           = r.Status,
-                    Transactions     = r.Transactions
+                    ExpectedAmount    = r.ExpectedAmount,
+                    DiscountAmount    = r.DiscountAmount,
+                    DiscountReason    = r.DiscountReason,
+                    TotalPaid         = totalPaid,
+                    Status            = r.Status,
+                    Transactions      = r.Transactions
                 };
             }).ToList();
 

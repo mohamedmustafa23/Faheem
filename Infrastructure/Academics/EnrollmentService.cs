@@ -108,7 +108,8 @@ namespace Infrastructure.Academics
                 title: "طالب جديد انضم",
                 message: $"انضم {studentName} لمجموعة ({group.Name}){(string.IsNullOrEmpty(studentPhone) ? "" : $" — {studentPhone}")}.",
                 NotificationType.StudentJoined,
-                ct);
+                ct,
+                route: $"/teacher/groups/{group.Id}");
 
             return $"Successfully joined '{group.Name}'";
         }
@@ -118,7 +119,7 @@ namespace Infrastructure.Academics
         /// Resolves teacher userIds via their Tenant claim.
         /// </summary>
         private async Task NotifyTeachersAsync(
-            string tenantId, string title, string message, NotificationType type, CancellationToken ct)
+            string tenantId, string title, string message, NotificationType type, CancellationToken ct, string? route = null)
         {
             var teacherUserIds = await _dbContext.UserClaims
                 .Where(uc => uc.ClaimType == ClaimConstants.Tenant && uc.ClaimValue == tenantId)
@@ -129,7 +130,7 @@ namespace Infrastructure.Academics
             if (teacherUserIds.Count == 0) return;
 
             await _notificationService.SendToUsersAsync(
-                teacherUserIds, title, message, type, tenantId, ct: ct);
+                teacherUserIds, title, message, type, tenantId, route: route, ct: ct);
         }
 
         public async Task<string> RemoveStudentAsync(Guid groupId, string studentId, string tenantId, CancellationToken ct = default)

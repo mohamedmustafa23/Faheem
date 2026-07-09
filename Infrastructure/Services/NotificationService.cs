@@ -141,6 +141,14 @@ namespace Infrastructure.Services
                 .ExecuteUpdateAsync(set => set.SetProperty(n => n.IsRead, true), ct);
         }
 
+        public async Task<int> MarkAsReadAsync(Guid notificationId, string userId, CancellationToken ct = default)
+        {
+            // Scoped to the owner so a user can only flip their own notification.
+            return await _dbContext.Notifications
+                .Where(n => n.Id == notificationId && n.UserId == userId && !n.IsRead)
+                .ExecuteUpdateAsync(set => set.SetProperty(n => n.IsRead, true), ct);
+        }
+
         public async Task SendSystemNotificationAsync(List<string> studentIds, string title, string message, NotificationType type, string tenantId, string? route = null, CancellationToken ct = default)
         {
             if (studentIds == null || !studentIds.Any()) return;

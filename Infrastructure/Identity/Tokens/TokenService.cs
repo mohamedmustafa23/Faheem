@@ -147,9 +147,36 @@ namespace Infrastructure.Identity.Tokens
             _dbContext.UserRefreshTokens.Update(storedToken);
             await _dbContext.SaveChangesAsync();
 
-            // Keep the user in the SAME workspace across a refresh — carry the tenant
-            // from the (now-expired) access token instead of re-resolving it.
-            var currentTenantId = userPrincipal.FindFirstValue(ClaimConstants.Tenant);
+            // Keep the user in the SAME workspace across a refresh. The workspace is a
+            // property of the SESSION (a user can belong to several), so it's recorded
+            // on the refresh-token record itself — the single source of truth — instead
+            // of being re-parsed from the expired access token's "tenant" claim (which
+            // can be dropped by inbound claim-type remapping, silently minting a VALID
+            // but workspace-less token → every scoped query returns empty; the "no data
+            // until logout+login" bug).
+            var currentTenantId = storedToken.WorkspaceIdentifier;
+
+            // Fallback for refresh tokens issued BEFORE this column existed
+            // (WorkspaceIdentifier == null): read the raw JWT payload, then a single
+            // active membership. Every token minted from here on carries the workspace,
+            // so this path fades out on its own — no forced logout, no downtime.
+            if (string.IsNullOrEmpty(currentTenantId))
+            {
+                var rawPayload = new JwtSecurityTokenHandler().ReadJwtToken(request.CurrentJwtToken).Payload;
+                currentTenantId = rawPayload.TryGetValue(ClaimConstants.Tenant, out var tenantValue)
+                    ? tenantValue?.ToString()
+                    : null;
+
+                if (string.IsNullOrEmpty(currentTenantId))
+                {
+                    var activeTenantIds = await _dbContext.WorkspaceMembers
+                        .Where(m => m.UserId == userId && m.Status == WorkspaceMemberStatus.Active)
+                        .Select(m => m.TenantId)
+                        .ToListAsync();
+                    if (activeTenantIds.Count == 1) currentTenantId = activeTenantIds[0];
+                }
+            }
+
             return await GenerateTokenAndUpdateUserAsync(userInDb, currentTenantId);
         }
 
@@ -179,7 +206,10 @@ namespace Infrastructure.Identity.Tokens
                 JwtId = jti,
                 CreatedOn = DateTime.UtcNow,
                 ExpiresOn = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpiryInDays),
-                IsRevoked = false
+                IsRevoked = false,
+                // Remember which workspace this session runs in, so a later refresh
+                // re-issues a token for the SAME workspace straight from the DB.
+                WorkspaceIdentifier = selectedTenantId
             };
 
             await _dbContext.UserRefreshTokens.AddAsync(refreshTokenEntity);

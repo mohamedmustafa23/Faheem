@@ -130,8 +130,17 @@ namespace Infrastructure.Academics
                     : null;
 
                 var pr = payRecords.Where(x => x.GroupId == g.GroupId).ToList();
-                decimal expected = pr.Sum(x => x.Status == PaymentStatus.Waived ? 0m : x.ExpectedAmount - x.DiscountAmount);
-                decimal paid = pr.Sum(x => x.Transactions.Sum(t => t.Amount));
+                // Per-record clamping (matches the student view): an overpayment on one
+                // cycle must NOT silently cancel out another cycle's outstanding debt.
+                decimal expected = 0m, paid = 0m, remaining = 0m;
+                foreach (var x in pr)
+                {
+                    decimal net = x.Status == PaymentStatus.Waived ? 0m : x.ExpectedAmount - x.DiscountAmount;
+                    decimal rPaid = x.Transactions.Sum(t => t.Amount);
+                    expected += net;
+                    paid += rPaid;
+                    remaining += Math.Max(0m, net - rPaid);
+                }
                 var payments = pr
                     .SelectMany(x => x.Transactions.Select(t => new ChildPaymentEntryDto
                     {
@@ -161,7 +170,7 @@ namespace Infrastructure.Academics
                     RankedStudents = scores.Count,
                     TotalExpected = expected,
                     TotalPaid = paid,
-                    TotalRemaining = Math.Max(0m, expected - paid),
+                    TotalRemaining = remaining,
                     Payments = payments,
                 });
             }

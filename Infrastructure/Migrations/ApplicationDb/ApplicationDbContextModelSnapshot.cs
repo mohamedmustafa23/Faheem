@@ -236,6 +236,90 @@ namespace Infrastructure.Migrations.ApplicationDb
                     b.HasAnnotation("Finbuckle:MultiTenant", true);
                 });
 
+            modelBuilder.Entity("Domain.Entities.LessonReport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Homework")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("LessonTopic")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)");
+
+                    b.Property<Guid>("OccurrenceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId");
+
+                    b.HasIndex("OccurrenceId")
+                        .IsUnique();
+
+                    b.ToTable("LessonReports", "Academics");
+
+                    b.HasAnnotation("Finbuckle:MultiTenant", true);
+                });
+
+            modelBuilder.Entity("Domain.Entities.LessonReportEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("HomeworkResult")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("LessonReportId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("Participation")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Performance")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("StudentId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("TenantId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LessonReportId", "StudentId")
+                        .IsUnique();
+
+                    b.ToTable("LessonReportEntries", "Academics");
+
+                    b.HasAnnotation("Finbuckle:MultiTenant", true);
+                });
+
             modelBuilder.Entity("Domain.Entities.Material", b =>
                 {
                     b.Property<Guid>("Id")
@@ -931,6 +1015,10 @@ namespace Infrastructure.Migrations.ApplicationDb
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
 
+                    b.Property<string>("WorkspaceIdentifier")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("UserId", "TokenHash");
@@ -1113,6 +1201,36 @@ namespace Infrastructure.Migrations.ApplicationDb
                         .IsRequired();
 
                     b.Navigation("Group");
+                });
+
+            modelBuilder.Entity("Domain.Entities.LessonReport", b =>
+                {
+                    b.HasOne("Domain.Entities.Group", "Group")
+                        .WithMany()
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("Domain.Entities.SessionOccurrence", "Occurrence")
+                        .WithMany()
+                        .HasForeignKey("OccurrenceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Group");
+
+                    b.Navigation("Occurrence");
+                });
+
+            modelBuilder.Entity("Domain.Entities.LessonReportEntry", b =>
+                {
+                    b.HasOne("Domain.Entities.LessonReport", "LessonReport")
+                        .WithMany("Entries")
+                        .HasForeignKey("LessonReportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LessonReport");
                 });
 
             modelBuilder.Entity("Domain.Entities.Material", b =>
@@ -1331,6 +1449,11 @@ namespace Infrastructure.Migrations.ApplicationDb
                     b.Navigation("Sessions");
 
                     b.Navigation("Students");
+                });
+
+            modelBuilder.Entity("Domain.Entities.LessonReport", b =>
+                {
+                    b.Navigation("Entries");
                 });
 
             modelBuilder.Entity("Domain.Entities.PaymentCycle", b =>

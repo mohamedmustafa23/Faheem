@@ -392,7 +392,7 @@ namespace Infrastructure.Academics
                         title: title,
                         message: studentBody,
                         type: NotificationType.PaymentDue,
-                        route: "/student/finance"),
+                        route: "/student/payments"),
                     parentPayloadFactory: (sid, name) => new NotificationPayload(
                         title: title,
                         message: string.Format(parentBodyTemplate, name),
@@ -511,7 +511,7 @@ namespace Infrastructure.Academics
                             title: "محفوظ لك دفعك السابق",
                             message: $"تم إلغاء الحصة الاستثنائية يوم {dateLabel}، تم حفظ دفعتك السابقة دون أي مبلغ إضافي.",
                             type: NotificationType.PaymentConfirmed,
-                            route: "/student/finance"),
+                            route: "/student/payments"),
                         parentPayloadFactory: (sid, name) => new NotificationPayload(
                             title: "محفوظ دفع ابنك",
                             message: $"تم إلغاء حصة استثنائية لـ {name} يوم {dateLabel}، وتم حفظ الدفعة السابقة دون أي مبلغ إضافي.",
@@ -528,7 +528,7 @@ namespace Infrastructure.Academics
                             title: "تعديل الرسوم",
                             message: $"تم إلغاء حصة إضافية لمجموعة ({groupName})، وتم تخفيض المتبقي عليك.",
                             type: NotificationType.PaymentDue,
-                            route: "/student/finance"),
+                            route: "/student/payments"),
                         parentPayloadFactory: (sid, name) => new NotificationPayload(
                             title: "تعديل رسوم ابنك",
                             message: $"تم إلغاء حصة إضافية لـ {name} في مجموعة ({groupName})، وتم تخفيض المتبقي.",
@@ -624,7 +624,7 @@ namespace Infrastructure.Academics
                         title: "تعديل الرسوم",
                         message: $"تم حذف حصة إضافية لمجموعة ({groupName})، وتم تخفيض المتبقي عليك.",
                         type: NotificationType.PaymentDue,
-                        route: "/student/finance"),
+                        route: "/student/payments"),
                     parentPayloadFactory: (sid, name) => new NotificationPayload(
                         title: "تعديل رسوم ابنك",
                         message: $"تم حذف حصة إضافية لـ {name} في مجموعة ({groupName})، وتم تخفيض المتبقي.",

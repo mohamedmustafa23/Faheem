@@ -49,6 +49,14 @@ namespace WebAPI.Controllers
             return Ok(response);
         }
 
+        [HttpPut("{id}/read")]
+        [OpenApiOperation("Mark One Read", "Flips a single notification to read — used when the user taps it in the in-app list.")]
+        public async Task<IActionResult> MarkOneReadAsync(Guid id)
+        {
+            var command = new MarkNotificationReadCommand { NotificationId = id, UserId = User.GetUserId()! };
+            return Ok(await Sender.Send(command));
+        }
+
         [HttpPost("device-token")]
         [OpenApiOperation("Save Device Token", "Saves the FCM token for the user's device to receive push notifications.")]
         public async Task<IActionResult> SaveDeviceTokenAsync([FromBody] SaveDeviceTokenRequest request)

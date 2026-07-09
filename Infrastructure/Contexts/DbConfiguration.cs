@@ -166,6 +166,11 @@ namespace Infrastructure.Contexts
                     .HasMaxLength(128)
                     .IsRequired();
 
+                // Nullable: pre-existing tokens have none; matches the tenant
+                // identifier length used on WorkspaceMembers.
+                builder.Property(t => t.WorkspaceIdentifier)
+                    .HasMaxLength(64);
+
                 builder.HasIndex(t => new { t.UserId, t.TokenHash });
             }
         }
@@ -384,6 +389,54 @@ namespace Infrastructure.Contexts
                     .OnDelete(DeleteBehavior.Cascade);
 
                 builder.HasIndex(sg => new { sg.ExamId, sg.StudentId }).IsUnique();
+            }
+        }
+
+        internal class LessonReportConfig : IEntityTypeConfiguration<Domain.Entities.LessonReport>
+        {
+            public void Configure(EntityTypeBuilder<Domain.Entities.LessonReport> builder)
+            {
+                builder.ToTable("LessonReports", "Academics").IsMultiTenant();
+                builder.Property(r => r.TenantId).HasMaxLength(64).IsRequired();
+                builder.Property(r => r.LessonTopic).HasMaxLength(300);
+                builder.Property(r => r.Homework).HasMaxLength(500);
+
+                builder.HasOne(r => r.Occurrence)
+                    .WithMany()
+                    .HasForeignKey(r => r.OccurrenceId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                // Group also reached via Occurrence → NoAction here to avoid a
+                // multiple-cascade-path conflict (mirrors SessionOccurrence → Group).
+                builder.HasOne(r => r.Group)
+                    .WithMany()
+                    .HasForeignKey(r => r.GroupId)
+                    .OnDelete(DeleteBehavior.NoAction);
+
+                // One report per occurrence.
+                builder.HasIndex(r => r.OccurrenceId).IsUnique();
+            }
+        }
+
+        internal class LessonReportEntryConfig : IEntityTypeConfiguration<Domain.Entities.LessonReportEntry>
+        {
+            public void Configure(EntityTypeBuilder<Domain.Entities.LessonReportEntry> builder)
+            {
+                builder.ToTable("LessonReportEntries", "Academics").IsMultiTenant();
+                builder.Property(e => e.TenantId).HasMaxLength(64).IsRequired();
+                builder.Property(e => e.StudentId).IsRequired();
+                builder.Property(e => e.Note).HasMaxLength(500);
+
+                builder.Property(e => e.Performance).HasConversion<string>().HasMaxLength(20);
+                builder.Property(e => e.Participation).HasConversion<string>().HasMaxLength(20);
+                builder.Property(e => e.HomeworkResult).HasConversion<string>().HasMaxLength(20);
+
+                builder.HasOne(e => e.LessonReport)
+                    .WithMany(r => r.Entries)
+                    .HasForeignKey(e => e.LessonReportId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                builder.HasIndex(e => new { e.LessonReportId, e.StudentId }).IsUnique();
             }
         }
 

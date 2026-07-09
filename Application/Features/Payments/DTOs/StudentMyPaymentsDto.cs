@@ -20,10 +20,17 @@ namespace Application.Features.Payments.DTOs
         // ── Standalone (per-session) records ──
         public List<StudentStandaloneRecordDto> Standalone { get; set; } = [];
 
-        // ── Group-level totals ──
+        // ── Group-level totals (aggregated across ALL cycles + standalone) ──
         public decimal TotalExpected { get; set; }
         public decimal TotalPaid { get; set; }
         public decimal TotalRemaining { get; set; }
+
+        /// <summary>
+        /// Portion of TotalRemaining that comes from CLOSED (previous) cycles —
+        /// so the student/parent can see "منها كذا متأخر من قبل" instead of the
+        /// old bug where closed-cycle debt was invisible.
+        /// </summary>
+        public decimal PreviousCyclesRemaining { get; set; }
 
         /// <summary>True when the student currently owes money in this group.</summary>
         public bool HasOutstanding => TotalRemaining > 0;

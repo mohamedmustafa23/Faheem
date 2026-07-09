@@ -16,6 +16,9 @@ namespace Application.Interfaces
 
         /// <summary>Flips every unread notification for the user to read in one shot.</summary>
         Task<int> MarkAllAsReadAsync(string userId, CancellationToken ct = default);
+
+        /// <summary>Flips a single notification to read (scoped to its owner). Returns rows updated (0 or 1).</summary>
+        Task<int> MarkAsReadAsync(Guid notificationId, string userId, CancellationToken ct = default);
         Task<string> SaveDeviceTokenAsync(SaveDeviceTokenRequest request, string userId, CancellationToken ct = default);
 
         /// <summary>
