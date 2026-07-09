@@ -3,6 +3,7 @@ using Infrastructure;
 using Infrastructure.Contexts;
 using Microsoft.EntityFrameworkCore;
 using WebApi;
+using Microsoft.AspNetCore.Rewrite;
 using Sentry.AspNetCore;
 
 namespace WebAPI
@@ -69,6 +70,14 @@ namespace WebAPI
             var webRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
             Directory.CreateDirectory(webRoot);
             var webRootProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(webRoot);
+
+            // Clean URLs for the marketing pages: "/privacy" and "/delete-account"
+            // serve their .html files (no extension needed). Targeted rules only, so
+            // API routes and uploads are untouched. Must run before the static files.
+            app.UseRewriter(new RewriteOptions()
+                .AddRewrite(@"^privacy/?$", "privacy.html", skipRemainingRules: true)
+                .AddRewrite(@"^delete-account/?$", "delete-account.html", skipRemainingRules: true));
+
             // "/" → index.html (the jokolearn.com landing page).
             app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = webRootProvider });
             app.UseStaticFiles(new StaticFileOptions { FileProvider = webRootProvider });
